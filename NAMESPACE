@@ -78,6 +78,14 @@ S3method(print,hs_reactivevalues)
 S3method(print,shiny2hotshiny_report)
 S3method(str,hs_reactivevalues)
 
+# Imports
+importFrom(R6,R6Class)
+importFrom(fastmap,fastmap)
+importFrom(cachem,cache_mem)
+importFrom(jsonlite,fromJSON)
+importFrom(base64enc,base64encode)
+importFrom(tools,file_ext)
+
 # Re-exported from shiny (identical UI and helpers)
 importFrom(shiny,..stacktraceoff..)
 importFrom(shiny,..stacktraceon..)

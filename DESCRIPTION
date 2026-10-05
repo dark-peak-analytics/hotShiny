@@ -25,11 +25,8 @@ Imports:
     promises (>= 1.2.0),
     jsonlite (>= 1.8.0),
     base64enc,
-    digest (>= 0.6.0),
     fastmap (>= 1.1.0),
     cachem,
-    grDevices,
-    graphics,
     stats,
     tools,
     utils
@@ -46,4 +43,4 @@ Suggests:
     markdown,
     withr
 Config/testthat/edition: 3
-RoxygenNote: 7.3.3
+Config/roxygen2/version: 8.0.0

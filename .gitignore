@@ -4,3 +4,6 @@
 .Ruserdata
 slides/
 .rlib/
+.claude/worktrees/
+*.Rcheck/
+hotShiny_*.tar.gz

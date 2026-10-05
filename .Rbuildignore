@@ -8,3 +8,14 @@
 ^docs$
 ^legacy$
 ^\.rlib$
+^\.claude$
+^tools$
+^COMPATIBILITY\.md$
+^hotShiny_.*\.tar\.gz$
+^.*\.Rcheck$
+^app\.log$
+^2026-.*\.txt$
+^tests/examples$
+^tests/integration$
+^tests/reproduce_s3\.R$
+^tests/test_exists_behavior\.R$

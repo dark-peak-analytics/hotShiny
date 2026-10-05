@@ -80,6 +80,17 @@ ui_extend <- function(name) {
 #' identical to shiny's.
 #'
 #' @name ui-extensions
+#' @inheritParams shiny::textInput
+#' @inheritParams shiny::textAreaInput
+#' @inheritParams shiny::numericInput
+#' @inheritParams shiny::selectInput
+#' @inheritParams shiny::dateInput
+#' @inheritParams shiny::dateRangeInput
+#' @inheritParams shiny::sliderInput
+#' @inheritParams shiny::fileInput
+#' @inheritParams shiny::checkboxGroupInput
+#' @inheritParams shiny::radioButtons
+#' @inheritParams shiny::varSelectInput
 #' @param ... Extra attributes, e.g. `class = "border rounded-xl"`.
 #' @seealso [publish_to_shiny()], which rewrites these into plain shiny.
 NULL
