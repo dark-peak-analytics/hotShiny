@@ -140,6 +140,10 @@ app_server_function <- function(app) {
 #' @param time_travel Record reactive events for inspection with
 #'   [reactive_history()]. Defaults to `getOption("hotshiny.time_travel", FALSE)`.
 #' @param watch Extra files or directories to watch when hot reload is on.
+#' @param tailwind Load Tailwind CSS (shiny.tailwind's CDN build) into the
+#'   page without touching the app's code; [publish_to_shiny()] adds the
+#'   equivalent `shiny.tailwind::use_tailwind()` call to published apps.
+#'   Defaults to `getOption("hotshiny.tailwind", FALSE)`.
 #' @export
 runApp <- function(appDir = getwd(),
                    port = getOption("shiny.port"),
@@ -151,7 +155,8 @@ runApp <- function(appDir = getwd(),
                    hot_reload = getOption("hotshiny.hot_reload", FALSE),
                    strict = getOption("hotshiny.strict", FALSE),
                    time_travel = getOption("hotshiny.time_travel", FALSE),
-                   watch = NULL) {
+                   watch = NULL,
+                   tailwind = getOption("hotshiny.tailwind", FALSE)) {
   if (isTRUE(.hs_server$running)) stop("Can't call `runApp()` from within `runApp()`.", call. = FALSE)
 
   # Route shiny's reactive primitives to hotShiny before the app's code runs,
@@ -174,7 +179,7 @@ runApp <- function(appDir = getwd(),
   port <- port %||% app$options$port %||% random_port(host)
   server <- HotServer$new(app, test_mode = isTRUE(test.mode), hot_reload = isTRUE(hot_reload),
                           strict = isTRUE(strict), time_travel = isTRUE(time_travel),
-                          watch = watch)
+                          watch = watch, tailwind = isTRUE(tailwind))
   server$run(host = host, port = as.integer(port), launch.browser = launch.browser, quiet = quiet)
 }
 
@@ -238,10 +243,12 @@ HotServer <- R6::R6Class("HotServer",
     strict = FALSE,
     time_travel = FALSE,
     watch = NULL,
+    tailwind = FALSE,
     url = NULL,
 
     initialize = function(app, test_mode = FALSE, hot_reload = FALSE, strict = FALSE,
-                          time_travel = FALSE, watch = NULL) {
+                          time_travel = FALSE, watch = NULL, tailwind = FALSE) {
+      self$tailwind <- tailwind
       self$app <- app
       self$test_mode <- test_mode
       self$hot_reload <- hot_reload
@@ -440,11 +447,18 @@ HotServer <- R6::R6Class("HotServer",
 
     # Inject the hot-reload client into the page when hot reload is on.
     decorate_page = function(res) {
-      if (!self$hot_reload || !is.character(res$content) || !grepl("text/html", res$content_type)) {
-        return(res)
+      if (!is.character(res$content) || !grepl("text/html", res$content_type)) return(res)
+      inject <- character(0)
+      if (self$tailwind && !grepl("cdn.tailwindcss.com", res$content, fixed = TRUE)) {
+        inject <- c(inject, as.character(shiny.tailwind_cdn()))
       }
-      tag <- '<script src="__hotshiny__/hotshiny-dev.js" data-hotshiny-dev></script>'
-      res$content <- sub("</head>", paste0(tag, "\n</head>"), res$content, fixed = TRUE)
+      if (self$hot_reload) {
+        inject <- c(inject, '<script src="__hotshiny__/hotshiny-dev.js" data-hotshiny-dev></script>')
+      }
+      if (length(inject)) {
+        res$content <- sub("</head>", paste0(paste(inject, collapse = "\n"), "\n</head>"),
+                           res$content, fixed = TRUE)
+      }
       res
     },
 
@@ -493,6 +507,15 @@ HotServer <- R6::R6Class("HotServer",
     }
   )
 )
+
+# The script tag shiny.tailwind::use_tailwind() emits (CDN build with the
+# forms/typography/aspect-ratio/line-clamp plugins).
+shiny.tailwind_cdn <- function() {
+  if (requireNamespace("shiny.tailwind", quietly = TRUE)) {
+    return(htmltools::doRenderTags(shiny.tailwind::use_tailwind()))
+  }
+  "<script src='https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp'></script>"
+}
 
 file_response <- function(path) {
   size <- file.info(path)$size

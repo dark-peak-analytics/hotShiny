@@ -3,7 +3,8 @@
 # Every UI function is shiny's own (re-exported), so markup is identical to
 # shiny's. The input functions below are thin wrappers that additionally
 # accept extra attributes through `...` — most usefully `class`, which is
-# appended to the control's classes (handy for Tailwind utility classes):
+# appended to the control's classes (handy for Tailwind utility classes);
+# other attributes are added as by htmltools::tagAppendAttributes():
 #
 #   textInput("name", NULL, class = "border rounded-xl")
 #
@@ -31,43 +32,42 @@ ui_extension_targets <- list(
   radioButtons = NULL
 )
 
+# Exactly htmltools::tagAppendAttributes(tag, ..., .cssSelector = selector),
+# which is what publish_to_shiny() rewrites extension calls into.
 apply_extra_attribs <- function(tag, extra, selector) {
   if (!length(extra)) return(tag)
   if (is.null(names(extra)) || any(!nzchar(names(extra)))) {
     stop("Extra arguments to input functions must be named attributes (e.g. class = ...)", call. = FALSE)
   }
   args <- c(list(tag), extra)
-  if (!is.null(selector)) {
-    found <- htmltools::tagQuery(tag)$find(selector)$length() > 0
-    if (found) args$.cssSelector <- selector
-  }
-  # `class` is appended by tagAppendAttributes; other attributes replace.
-  others <- setdiff(names(extra), "class")
-  if (length(others)) {
-    q <- htmltools::tagQuery(tag)
-    if (!is.null(args$.cssSelector)) q <- q$find(selector)
-    q$removeAttrs(others)
-    tag <- q$allTags()
-    args[[1]] <- tag
-  }
+  if (!is.null(selector)) args$.cssSelector <- selector
   do.call(htmltools::tagAppendAttributes, args)
 }
 
+# Shiny's function with the same formals plus `...`; named arguments that are
+# not shiny's own become attributes. (Some shiny inputs already have a `...`
+# that must be empty, e.g. textInput(); for those the extras are taken out of
+# `...` before calling shiny.)
 ui_extend <- function(name) {
   fn <- get(name, envir = asNamespace("shiny"))
   selector <- ui_extension_targets[[name]]
   fmls <- formals(fn)
-  if ("..." %in% names(fmls)) return(fn)
+  known <- setdiff(names(fmls), "...")
   wrapper <- function() {
     call <- match.call(expand.dots = FALSE)
-    extra <- lapply(call$..., eval, envir = parent.frame())
+    dots <- call$...
+    extra_names <- setdiff(names(dots) %||% character(0), c("", known))
+    extra <- lapply(dots[extra_names], eval, envir = parent.frame())
+    rest <- dots[setdiff(seq_along(dots), match(extra_names, names(dots)))]
     call$... <- NULL
+    call <- as.call(c(as.list(call), rest))
     call[[1]] <- fn
     tag <- eval(call, parent.frame())
     apply_extra_attribs(tag, extra, selector)
   }
-  formals(wrapper) <- c(fmls, alist(... = ))
-  environment(wrapper) <- list2env(list(fn = fn, selector = selector),
+  if (!"..." %in% names(fmls)) fmls <- c(fmls, alist(... = ))
+  formals(wrapper) <- fmls
+  environment(wrapper) <- list2env(list(fn = fn, selector = selector, known = known),
                                    parent = asNamespace("hotShiny"))
   wrapper
 }
