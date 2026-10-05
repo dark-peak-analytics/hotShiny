@@ -36,6 +36,11 @@ hot_state_initial <- function(domain, node, value) {
   value
 }
 
+# TRUE while a hot reload is re-running the server function. Event handlers
+# created then must not fire for events that were already handled before the
+# reload (e.g. a button that has been clicked twice).
+hot_restoring <- function(domain) !is.null(hot_store(domain)$restore)
+
 hot_state_register <- function(domain, node, getter) {
   store <- hot_store(domain)
   store$registry[[node]] <- getter
@@ -111,7 +116,7 @@ render_dev_page <- function(app, req = fake_request(), test_mode = FALSE) {
     }
   })
   if (is.null(value) || inherits(value, "httpResponse")) return(value)
-  value <- htmltools::tagify(value)
+  value <- utils::getFromNamespace("tagify", "htmltools")(value)
   if (!inherits(value, "html_document")) value <- key_ui(value)
   shiny_internal("renderPage")(value, 0, test_mode)
 }

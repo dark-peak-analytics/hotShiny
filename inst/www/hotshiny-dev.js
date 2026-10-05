@@ -100,29 +100,39 @@
     });
   }
 
+  // Load <head> content of the new render that the page does not have yet:
+  // stylesheets and scripts (in document order, each script waiting for the
+  // previous one), plus new inline <style>/<script> blocks — dependencies use
+  // inline head scripts too (e.g. bootstrap-datepicker's noConflict shim).
   function loadHeadDeps(head) {
     var have = new Set();
     document.querySelectorAll('script[src]').forEach(function (s) { have.add(s.getAttribute('src')); });
     document.querySelectorAll('link[href]').forEach(function (l) { have.add(l.getAttribute('href')); });
+    var inline = new Set();
+    document.querySelectorAll('script:not([src]), style').forEach(function (s) { inline.add(s.textContent.trim()); });
     var chain = Promise.resolve();
     head.querySelectorAll('link[rel="stylesheet"][href], style, script').forEach(function (el) {
       var src = el.getAttribute('src') || el.getAttribute('href');
-      if (src && have.has(src)) return;
-      if (!src && el.tagName === 'SCRIPT') return; // inline scripts already ran
-      if (el.tagName === 'STYLE') {
-        var same = Array.prototype.some.call(document.head.querySelectorAll('style'), function (s) {
-          return s.textContent === el.textContent;
-        });
-        if (!same) document.head.appendChild(el.cloneNode(true));
-        return;
+      if (src) {
+        if (have.has(src)) return;
+        have.add(src);
+      } else {
+        var text = el.textContent.trim();
+        if (!text || inline.has(text)) return;
+        inline.add(text);
       }
       chain = chain.then(function () {
         return new Promise(function (resolve) {
           var n = document.createElement(el.tagName.toLowerCase());
           Array.prototype.forEach.call(el.attributes, function (a) { n.setAttribute(a.name, a.value); });
-          n.onload = n.onerror = function () { resolve(); };
-          document.head.appendChild(n);
-          if (el.tagName === 'LINK') resolve();
+          if (!src) n.textContent = el.textContent;
+          if (el.tagName === 'SCRIPT' && src) {
+            n.onload = n.onerror = function () { resolve(); };
+            document.head.appendChild(n);
+          } else {
+            document.head.appendChild(n);
+            resolve();
+          }
         });
       });
     });

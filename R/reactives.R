@@ -373,10 +373,11 @@ observeEvent <- function(eventExpr, handlerExpr,
   event_fn <- quo_function(eq)
   handler_fn <- quo_function(hq)
   initialized <- FALSE
+  skip_first <- ignoreInit || hot_restoring(domain)
   o <- NULL
   o <- Observer$new(function() {
     value <- event_fn()
-    if (ignoreInit && !initialized) {
+    if (skip_first && !initialized) {
       initialized <<- TRUE
       return(invisible(NULL))
     }
@@ -461,9 +462,10 @@ bindEvent <- function(x, ..., ignoreNULL = TRUE, ignoreInit = FALSE, once = FALS
   if (inherits(x, "Observer")) {
     handler <- x$.func
     initialized <- FALSE
+    skip_first <- ignoreInit || hot_restoring(x$.domain)
     x$.func <- function() {
       value <- event_fn()
-      if (ignoreInit && !initialized) {
+      if (skip_first && !initialized) {
         initialized <<- TRUE
         return(invisible(NULL))
       }
