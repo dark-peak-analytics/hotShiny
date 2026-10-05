@@ -1,0 +1,57 @@
+import { Page } from '@playwright/test';
+import { PNG } from 'pngjs';
+import pixelmatch from 'pixelmatch';
+
+/**
+ * Serialise the live DOM in a runtime-neutral form: hotShiny's dev-only script
+ * is dropped and per-render random ids (tabset ids, etc.) are canonicalised so
+ * two independent renders of the same UI compare equal.
+ */
+export async function normalizedDom(page: Page): Promise<{ body: string; head: string[] }> {
+  return page.evaluate(() => {
+    const body = document.body.cloneNode(true) as HTMLElement;
+    body.querySelectorAll('script[src*="hotshiny-dev"], [data-hotshiny-dev]').forEach((el) => el.remove());
+    let html = body.outerHTML;
+
+    // Random numbers that shiny itself regenerates on every render.
+    const seen = new Map<string, string>();
+    const canon = (raw: string) => {
+      if (!seen.has(raw)) seen.set(raw, String(seen.size));
+      return seen.get(raw)!;
+    };
+    html = html.replace(/(tab-)(\d{4})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
+    html = html.replace(/(data-tabsetid=")(\d+)(")/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
+    html = html.replace(/(bslib-[a-z-]+-)(\d{3,})/g, (_m, a, n) => `${a}${canon(n)}`);
+    html = html.replace(/(id="|for="|aria-labelledby="|aria-controls="|data-bs-target="#|href="#)(navbar-collapse-|nav-|bslib-)(\d+)/g,
+      (_m, a, b, n) => `${a}${b}${canon(n)}`);
+
+    const head = Array.from(document.querySelectorAll('script[src], link[rel="stylesheet"][href]'))
+      .map((el) => (el as HTMLScriptElement).src || (el as HTMLLinkElement).href)
+      .filter((u) => !/hotshiny-dev/.test(u))
+      .map((u) => new URL(u).pathname);
+    return { body: html, head };
+  });
+}
+
+export interface PixelDiff {
+  ratio: number;
+  diffPng: Buffer;
+}
+
+export function diffScreenshots(a: Buffer, b: Buffer): PixelDiff {
+  const pa = PNG.sync.read(a);
+  const pb = PNG.sync.read(b);
+  const width = Math.max(pa.width, pb.width);
+  const height = Math.max(pa.height, pb.height);
+  const pad = (p: PNG) => {
+    if (p.width === width && p.height === height) return p;
+    const out = new PNG({ width, height });
+    PNG.bitblt(p, out, 0, 0, p.width, p.height, 0, 0);
+    return out;
+  };
+  const A = pad(pa);
+  const B = pad(pb);
+  const diff = new PNG({ width, height });
+  const n = pixelmatch(A.data, B.data, diff.data, width, height, { threshold: 0.1 });
+  return { ratio: n / (width * height), diffPng: PNG.sync.write(diff) };
+}

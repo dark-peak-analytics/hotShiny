@@ -1,0 +1,16 @@
+{
+  "name": "hotshiny-e2e",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:shiny": "playwright test --project=shiny",
+    "test:hotshiny": "playwright test --project=hotshiny",
+    "test:parity": "playwright test --project=parity"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/pngjs": "^6.0.5",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0"
+  }
+}

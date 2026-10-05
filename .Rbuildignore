@@ -4,3 +4,5 @@
 ^\.Rproj\.user
 ^.*\.Rproj$
 ^\.Rproj\.user$
+^tests/e2e$
+^docs$
