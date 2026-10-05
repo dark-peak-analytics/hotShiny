@@ -19,6 +19,13 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
       if (!seen.has(raw)) seen.set(raw, String(seen.size));
       return seen.get(raw)!;
     };
+    html = html.replace(/session\/[0-9a-f]+\//g, 'session/TOKEN/');
+    html = html.replace(/nonce=[0-9a-f]+/g, 'nonce=NONCE');
+    // selectize generates random listbox ids, referenced via aria-owns
+    for (const m of html.matchAll(/aria-owns="([a-z0-9]{6,})"/g)) {
+      html = html.split(m[1]).join('selectize-' + canon(m[1]));
+    }
+    html = html.replace(/ui-tab-\d+/g, (m) => 'ui-tab-' + canon(m));
     html = html.replace(/(tab-)(\d{4})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(data-tabsetid=")(\d+)(")/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(bslib-[a-z-]+-)(\d{3,})/g, (_m, a, n) => `${a}${canon(n)}`);

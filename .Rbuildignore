@@ -6,3 +6,4 @@
 ^\.Rproj\.user$
 ^tests/e2e$
 ^docs$
+^legacy$
