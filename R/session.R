@@ -114,7 +114,10 @@ HotSession <- R6::R6Class("HotSession",
       self$files <- fastmap::fastmap()
       self$downloads <- fastmap::fastmap()
       self$userData <- new.env(parent = emptyenv())
-      self$options <- app$options %||% list()
+      # Read the app state now, not the server's startup snapshot: rendering the
+      # page records options there (bootstrapLib() stores the bslib theme), and
+      # getCurrentTheme()/setCurrentTheme() inside the session rely on them.
+      self$options <- shiny_internal("getCurrentAppState")()$options %||% app$options %||% list()
       self$cache <- cachem::cache_mem(max_size = 200 * 1024^2)
       self$request <- ws$request
 

@@ -11,6 +11,19 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
   return page.evaluate(() => {
     const body = document.body.cloneNode(true) as HTMLElement;
     body.querySelectorAll('script[src*="hotshiny-dev"], [data-hotshiny-dev]').forEach((el) => el.remove());
+    // Class token order records which client-side initialiser ran first (e.g.
+    // shiny binding vs. a plugin decorating the same element on window load),
+    // which varies between loads of the same shiny app.
+    body.querySelectorAll('[class]').forEach((el) => {
+      el.setAttribute('class', Array.from(el.classList).sort().join(' '));
+    });
+    // OverlayScrollbars (bs4Dash's sidebar) sizes its invisible glue spacer
+    // only if its update timer catches a size change after window load, which
+    // varies between loads of the same shiny app.
+    body.querySelectorAll<HTMLElement>('.os-content-glue').forEach((el) => {
+      el.style.removeProperty('width');
+      el.style.removeProperty('height');
+    });
     let html = body.outerHTML;
 
     // Random numbers that shiny itself regenerates on every render.
@@ -29,7 +42,7 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
     html = html.replace(/(tab-)(\d{4})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(data-tabsetid=")(\d+)(")/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(bslib-[a-z-]+-)(\d{3,})/g, (_m, a, n) => `${a}${canon(n)}`);
-    html = html.replace(/(id="|for="|aria-labelledby="|aria-controls="|data-bs-target="#|href="#)(navbar-collapse-|nav-|bslib-)(\d+)/g,
+    html = html.replace(/(id="|for="|aria-labelledby="|aria-controls="|data-bs-target="#|data-target="#|href="#)(navbar-collapse-|nav-|bslib-)(\d+)/g,
       (_m, a, b, n) => `${a}${b}${canon(n)}`);
 
     const head = Array.from(document.querySelectorAll('script[src], link[rel="stylesheet"][href]'))
@@ -70,6 +83,35 @@ import { waitForIdle } from './fixtures';
 export const MAX_PIXEL_DIFF = 0.002;
 
 /**
+ * Wait until the DOM has stopped changing (or give up after `timeout`, for
+ * pages that tick forever). Shiny being idle is not enough: client-side
+ * widgets keep adjusting themselves afterwards (ion.rangeSlider re-measures
+ * its labels on a timer once its stylesheet has applied), so comparing pages
+ * loaded at different moments would compare different stages of that.
+ */
+async function domQuiet(page: Page, quietMs = 600, timeout = 4000) {
+  await page.evaluate(
+    ([quietMs, timeout]) =>
+      new Promise<void>((resolve) => {
+        const start = performance.now();
+        let timer: ReturnType<typeof setTimeout>;
+        const observer = new MutationObserver(() => arm());
+        const done = () => {
+          observer.disconnect();
+          resolve();
+        };
+        const arm = () => {
+          clearTimeout(timer);
+          timer = setTimeout(done, Math.max(0, Math.min(quietMs, timeout - (performance.now() - start))));
+        };
+        observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+        arm();
+      }),
+    [quietMs, timeout],
+  );
+}
+
+/**
  * Declare a parity test for a fixture: it is rendered by plain shiny (the
  * reference, produced by publish_to_shiny()) and by hotShiny; the live DOM
  * after shiny.js has initialised, the loaded dependencies, and the pixels
@@ -102,12 +144,15 @@ export function parityTest(
       await page.addStyleTag({
         content: '*,*::before,*::after{transition:none!important;animation:none!important;caret-color:transparent!important}',
       });
+      await domQuiet(page);
     }
 
     test('DOM, dependencies and pixels match shiny', async ({ browser }, testInfo) => {
       const refPage = await (await browser.newContext()).newPage();
       const hotPage = await (await browser.newContext()).newPage();
-      await Promise.all([load(refPage, ref), load(hotPage, hot)]);
+      // One page at a time, so they do not compete for CPU while initialising.
+      await load(refPage, ref);
+      await load(hotPage, hot);
 
       const [refDom, hotDom] = await Promise.all([normalizedDom(refPage), normalizedDom(hotPage)]);
       expect.soft(hotDom.head, 'loaded <script>/<link> dependencies').toEqual(refDom.head);

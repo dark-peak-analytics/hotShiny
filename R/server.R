@@ -284,8 +284,15 @@ HotServer <- R6::R6Class("HotServer",
 
       private$httpuv <- httpuv::startServer(host, port, list(
         call = function(req) self$handle_http(req),
-        onWSOpen = function(ws) self$handle_ws(ws)
+        onWSOpen = function(ws) self$handle_ws(ws),
+        staticPaths = private$static_paths(),
+        staticPathOptions = httpuv::staticPathOptions(
+          html_charset = "utf-8", headers = list(`X-Content-Type-Options` = "nosniff")
+        )
       ))
+      # Lets addResourcePath() register paths created later (e.g. by
+      # dependencies rendered at runtime) with httpuv, as shiny does.
+      shiny::shinyOptions(server = private$httpuv)
       on.exit({
         for (s in private$session_map$as_list()) try(s$close(), silent = TRUE)
         httpuv::stopServer(private$httpuv)
@@ -460,6 +467,26 @@ HotServer <- R6::R6Class("HotServer",
                            res$content, fixed = TRUE)
       }
       res
+    },
+
+    # Assets are served by httpuv off the R thread, like shiny does, so pages
+    # load at the same pace: package JS that runs on window "load" relies on
+    # the same ordering against shiny.js's initialisation. static_file() below
+    # remains the fallback for anything not registered here.
+    static_paths = function() {
+      paths <- list(
+        session = httpuv::excludeStaticPath(),
+        shared = system.file("www", "shared", package = "shiny"),
+        `__hotshiny__` = system.file("www", package = "hotShiny")
+      )
+      www <- file.path(self$app$hotshiny$appDir %||% getwd(), "www")
+      if (dir.exists(www)) {
+        # Hot reload edits www/ files in place; make the browser revalidate.
+        headers <- if (self$hot_reload) list(`Cache-Control` = "no-cache") else list()
+        paths <- c(list(`/` = httpuv::staticPath(www, indexhtml = FALSE, fallthrough = TRUE,
+                                                 headers = headers)), paths)
+      }
+      c(paths, shiny_internal(".globals")$resourcePaths)
     },
 
     static_file = function(path) {
