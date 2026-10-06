@@ -114,7 +114,9 @@ HotSession <- R6::R6Class("HotSession",
       self$files <- fastmap::fastmap()
       self$downloads <- fastmap::fastmap()
       self$userData <- new.env(parent = emptyenv())
-      self$options <- app$options %||% list()
+      # Like shiny, sessions start from the running app's options, which include
+      # shinyOptions() set by global code or onStart (and the httpuv `server`).
+      self$options <- shiny_internal("getCurrentAppState")()$options %||% app$options %||% list()
       self$cache <- cachem::cache_mem(max_size = 200 * 1024^2)
       self$request <- ws$request
 

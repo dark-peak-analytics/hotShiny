@@ -282,10 +282,19 @@ HotServer <- R6::R6Class("HotServer",
       if (self$strict) enable_strict_mode()
       if (self$hot_reload) private$start_hot_reload()
 
+      # Resource paths are served by httpuv's I/O thread, as in shiny, so the
+      # browser can still load dependencies (e.g. of a modal shown just before
+      # a long computation) while R is busy in an observer.
       private$httpuv <- httpuv::startServer(host, port, list(
         call = function(req) self$handle_http(req),
-        onWSOpen = function(ws) self$handle_ws(ws)
+        onWSOpen = function(ws) self$handle_ws(ws),
+        staticPaths = private$static_paths(),
+        staticPathOptions = httpuv::staticPathOptions(
+          html_charset = "utf-8", headers = list(`Cache-Control` = "no-cache")
+        )
       ))
+      # addResourcePath() registers paths added while the app runs with this server.
+      shiny::shinyOptions(server = private$httpuv)
       on.exit({
         for (s in private$session_map$as_list()) try(s$close(), silent = TRUE)
         httpuv::stopServer(private$httpuv)
@@ -462,16 +471,25 @@ HotServer <- R6::R6Class("HotServer",
       res
     },
 
+    resource_roots = function() {
+      c(
+        `__hotshiny__` = system.file("www", package = "hotShiny"),
+        shared = system.file("www", "shared", package = "shiny"),
+        unlist(shiny::resourcePaths())
+      )
+    },
+
+    static_paths = function() {
+      roots <- private$resource_roots()
+      lapply(roots[nzchar(roots) & dir.exists(roots)], httpuv::staticPath, indexhtml = FALSE)
+    },
+
     static_file = function(path) {
       parts <- strsplit(sub("^/", "", path), "/", fixed = TRUE)[[1]]
       if (length(parts) == 0 || any(parts %in% c("..", "."))) return(NULL)
       prefix <- parts[1]
       rest <- paste(parts[-1], collapse = "/")
-      roots <- c(
-        `__hotshiny__` = system.file("www", package = "hotShiny"),
-        shared = system.file("www", "shared", package = "shiny"),
-        unlist(shiny::resourcePaths())
-      )
+      roots <- private$resource_roots()
       if (prefix %in% names(roots) && nzchar(rest)) {
         f <- file.path(roots[[prefix]], rest)
         if (file.exists(f) && !dir.exists(f)) return(file_response(f))

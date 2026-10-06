@@ -1,0 +1,10 @@
+{
+  "cultural_date_format": "%d-%m-%Y",
+  "languages": ["en", "es", "pl"],
+  "translation": [
+    {"en": "Hello", "es": "Hola", "pl": "Cześć"},
+    {"en": "Goodbye", "es": "Adiós", "pl": "Do widzenia"},
+    {"en": "Language", "es": "Idioma", "pl": "Język"},
+    {"en": "Server says", "es": "El servidor dice", "pl": "Serwer mówi"}
+  ]
+}
