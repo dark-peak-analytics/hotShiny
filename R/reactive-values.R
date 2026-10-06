@@ -120,6 +120,7 @@ ReactiveValues <- R6::R6Class("ReactiveValues",
       private$allDeps <- Dependents$new(node, graph)
       private$visibleDeps <- Dependents$new(node, graph)
       private$frozen <- character(0)
+      private$order <- character(0)
     },
 
     get = function(key) {
@@ -134,6 +135,7 @@ ReactiveValues <- R6::R6Class("ReactiveValues",
         return(invisible(FALSE))
       }
       if (!has) {
+        private$order <- c(private$order, key)
         private$namesDeps$invalidate()
       }
       self$.values$set(key, value)
@@ -156,11 +158,13 @@ ReactiveValues <- R6::R6Class("ReactiveValues",
 
     names = function() {
       private$namesDeps$register()
-      self$.values$keys()
+      private$order
     },
 
     toList = function(all.names = FALSE) {
-      keys <- self$.values$keys(sort = TRUE)
+      # Insertion order, as shiny's names() and reactiveValuesToList() give
+      # (for input: the order the client first sent the values).
+      keys <- private$order
       if (all.names) {
         private$allDeps$register()
       } else {
@@ -173,7 +177,7 @@ ReactiveValues <- R6::R6Class("ReactiveValues",
 
     # Read without taking a dependency.
     peek = function(key) self$.values$get(key),
-    keys = function() self$.values$keys(),
+    keys = function() private$order,
 
     freeze = function(key, invalidate = FALSE) {
       private$frozen <- union(private$frozen, key)
@@ -203,6 +207,7 @@ ReactiveValues <- R6::R6Class("ReactiveValues",
           private$keyDeps$remove(key)
         }
       }
+      private$order <- private$order[!startsWith(private$order, prefix)]
       private$namesDeps$invalidate()
       private$allDeps$invalidate()
       private$visibleDeps$invalidate()
@@ -214,6 +219,7 @@ ReactiveValues <- R6::R6Class("ReactiveValues",
     allDeps = NULL,
     visibleDeps = NULL,
     frozen = NULL,
+    order = NULL,
 
     nodeFor = function(key) {
       if (is.null(self$graph)) return(NULL)

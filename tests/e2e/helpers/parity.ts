@@ -61,6 +61,10 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
     // shinybusy: random spinner ids and SpinKit class suffixes
     html = html.replace(/(spin-)([0-9a-f]{24})\b/g, (_m, a, n) => `${a}${canon(n)}`);
     html = html.replace(/(sk-[a-z]+-)([a-z]{12})\b/g, (_m, a, n) => `${a}${canon(n)}`);
+    // gt gives each rendered table a random 10-letter id, which scopes its <style>
+    for (const m of html.matchAll(/<div id="([a-z]{10})" style="padding-left:/g)) {
+      html = html.split(m[1]).join('gt-' + canon(m[1]));
+    }
     html = html.replace(/ui-tab-\d+/g, (m) => 'ui-tab-' + canon(m));
     html = html.replace(/(tab-)(\d{4})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(data-tabsetid=")(\d+)(")/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);

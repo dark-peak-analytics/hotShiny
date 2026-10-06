@@ -344,7 +344,7 @@ HotSession <- R6::R6Class("HotSession",
         pending <- length(private$progress_keys) > 0 || private$values$size() > 0 ||
           private$errors$size() > 0 || private$input_messages$size() > 0
         if (!pending) {
-          if (private$test_mode) private$send(values = structure(list(), names = character(0)))
+          if (private$test_mode) private$send(values = list())
           return(invisible(NULL))
         }
         private$progress_keys <- character(0)
@@ -401,7 +401,10 @@ HotSession <- R6::R6Class("HotSession",
         }
         invisible(NULL)
       }, label = paste0("output$", name), suspended = private$should_suspend(name),
-      domain = self, kind = "output", node_label = name)
+      # The domain current where the output is assigned (a module's session
+      # proxy inside moduleServer()), as in shiny: render code that calls
+      # getDefaultReactiveDomain()$ns() must get the module's namespace.
+      domain = shiny::getDefaultReactiveDomain() %||% self, kind = "output", node_label = name)
 
       for (a in names(output_attrs)) attr(obs, a) <- output_attrs[[a]]
       obs$onInvalidate(function() self$showProgress(name))
@@ -642,14 +645,24 @@ HotSession <- R6::R6Class("HotSession",
     exportTestValues = function(..., quoted_ = FALSE, env_ = parent.frame()) {
       if (!private$test_mode) return(invisible(NULL))
       dots <- if (quoted_) list(...) else eval(substitute(alist(...)))
+      if (length(dots) && (is.null(names(dots)) || any(!nzchar(names(dots))))) {
+        stop("exportTestValues: all arguments must be named.")
+      }
       for (n in names(dots)) private$test_exports[[n]] <- list(expr = dots[[n]], env = env_)
       invisible(NULL)
     },
 
-    getTestSnapshotUrl = function(input = TRUE, output = TRUE, export = TRUE, format = "json") {
-      flag <- function(x) if (isTRUE(x)) "1" else if (isFALSE(x)) NULL else paste(x, collapse = ",")
-      q <- c(input = flag(input), output = flag(output), export = flag(export), format = format)
-      paste0(private$test_snapshot_url, "&", paste(names(q), q, sep = "=", collapse = "&"))
+    # Same string as shiny's (empty `&&` slots included), since tests may
+    # compare or parse it.
+    getTestSnapshotUrl = function(input = TRUE, output = TRUE, export = TRUE,
+                                  format = "json", sortC = FALSE) {
+      part <- function(group, value) {
+        if (isTRUE(value)) paste0(group, "=1")
+        else if (is.character(value)) paste0(group, "=", paste(value, collapse = ","))
+        else ""
+      }
+      paste(private$test_snapshot_url, part("input", input), part("output", output),
+            part("export", export), part("sortC", sortC), paste0("format=", format), sep = "&")
     },
 
     # Bookmarking is not supported; these keep apps that merely configure it running.
@@ -877,28 +890,73 @@ HotSession <- R6::R6Class("HotSession",
       if (is.null(job)) stop("Unknown upload job")
       private$uploads$remove(jobId)
       private$input_impl$set(inputId, job$finish())
+      # As in shiny: test snapshots show the upload's file name, not its temp path.
+      shiny::setSerializer(inputId, shiny_internal("serializerFileInput"), session = self)
+      shiny::snapshotPreprocessInput(inputId, shiny_internal("snapshotPreprocessorFileInput"),
+                                     session = self)
       invisible(NULL)
     },
 
+    # The snapshot endpoint shinytest/shinytest2 read (AppDriver$get_values()
+    # asks for format=rds&sortC=1); same query parameters, value shapes and
+    # serialisation as shiny's, so recorded snapshots carry over.
     enable_test_snapshot = function() {
       private$test_snapshot_url <- self$registerDataObj("shinytest", NULL, function(data, req) {
         params <- shiny::parseQueryString(req$QUERY_STRING)
+        format <- params$format %||% "json"
+        if (!is.null(params$sortC) && params$sortC != "1") {
+          stop("The `sortC` parameter can only be `1` or not supplied")
+        }
+        radix <- !is.null(params$sortC) || isTRUE(shiny::getShinyOption("snapshotsortc", default = FALSE))
+        sort_names <- function(x) {
+          if (length(x) == 0) return(x)
+          x[order(names(x), method = if (radix) "radix" else "auto")]
+        }
+        pick <- function(all, which) {
+          if (which == "1") all else all[intersect(strsplit(which, ",")[[1]], names(all))]
+        }
+        preprocess <- function(x, get_fun) {
+          lapply(stats::setNames(names(x), names(x)), function(n) (get_fun(n) %||% identity)(x[[n]]))
+        }
+
         values <- list()
         if (!is.null(params$input)) {
           all <- isolate(shiny::reactiveValuesToList(self$input, all.names = TRUE))
-          values$input <- if (params$input == "1") all else all[intersect(strsplit(params$input, ",")[[1]], names(all))]
+          values$input <- sort_names(preprocess(pick(all, params$input), function(n) {
+            private$input_impl$getMeta(n, "shiny.snapshot.preprocess")
+          }))
         }
         if (!is.null(params$output)) {
-          all <- private$output_values
-          values$output <- if (params$output == "1") all else all[intersect(strsplit(params$output, ",")[[1]], names(all))]
+          out <- pick(private$output_values, params$output)
+          excluded <- vapply(names(out), function(n) {
+            isTRUE(attr(private$outputs[[n]], "snapshotExclude", exact = TRUE))
+          }, logical(1))
+          values$output <- sort_names(preprocess(out[!excluded], function(n) {
+            attr(private$outputs[[n]], "snapshotPreprocess", exact = TRUE)
+          }))
         }
         if (!is.null(params$export)) {
-          ex <- private$test_exports
-          if (params$export != "1") ex <- ex[intersect(strsplit(params$export, ",")[[1]], names(ex))]
-          values$export <- isolate(lapply(ex, function(item) eval(item$expr, envir = item$env)))
+          ex <- pick(private$test_exports, params$export)
+          values$export <- sort_names(isolate(lapply(ex, function(item) eval(item$expr, envir = item$env))))
         }
-        values <- lapply(values, function(v) v[order(names(v))])
-        http_response(200, "application/json", shiny_internal("toJSON")(values, pretty = TRUE))
+        # Always named lists, so JSON gets objects (not arrays) and RDS a stable type.
+        values <- lapply(values, function(v) {
+          if (is.null(names(v))) names(v) <- character(length(v))
+          v
+        })
+        if (length(values) == 0) {
+          return(http_response(400, "text/plain", "None of export, input, or output requested."))
+        }
+        if (identical(format, "json")) {
+          return(http_response(200, "application/json", shiny_internal("toJSON")(values, pretty = TRUE)))
+        }
+        if (identical(format, "rds")) {
+          con <- rawConnection(raw(0), "wb")
+          on.exit(close(con), add = TRUE)
+          saveRDS(values, con)
+          return(http_response(200, "application/octet-stream", rawConnectionValue(con)))
+        }
+        http_response(400, "text/plain", paste("Invalid format requested:", format))
       })
     },
 

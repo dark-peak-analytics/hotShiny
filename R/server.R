@@ -21,11 +21,51 @@ shinyApp <- function(ui, server, onStart = NULL, options = list(), uiPattern = "
   if (!is.null(enableBookmarking) && !identical(enableBookmarking, "disable")) {
     warning("hotShiny does not support bookmarking; enableBookmarking is ignored.", call. = FALSE)
   }
-  app <- shiny_original("shinyApp")(ui, server, onStart = onStart, options = options,
-                                       uiPattern = uiPattern)
+  holder <- new.env(parent = emptyenv())
+  app <- shiny_original("shinyApp")(ui, server, onStart = handoff_on_start(onStart, holder),
+                                       options = options, uiPattern = uiPattern)
   app$hotshiny <- list(ui = ui, server = server)
   class(app) <- c("hotshiny.appobj", class(app))
+  holder$app <- app
   app
+}
+
+# The app's onStart. Plain shiny::runApp() calls it right before it starts
+# serving; that happens when something outside hotShiny launches a hotShiny
+# app (shinytest2's AppDriver child process, Shiny Server and Posit Connect
+# all call shiny::runApp(dir), which sources app.R). The app's reactives live
+# on hotShiny's engine, which shiny would never flush, so instead of letting
+# shiny serve it, hotShiny serves it on the host/port shiny chose and makes
+# that shiny::runApp() call return hotShiny's result.
+handoff_on_start <- function(onStart, holder) {
+  force(onStart)
+  function() {
+    if (!isTRUE(.hs_server$running)) serve_instead_of_shiny(holder$app)
+    if (is.function(onStart)) onStart()
+  }
+}
+
+serve_instead_of_shiny <- function(app) {
+  setup <- find_frame(shiny_internal(".setupShinyApp"))
+  run <- find_frame(shiny_original("runApp"))
+  if (is.null(setup) || is.null(run)) return(invisible(FALSE))
+  # Run directly on an app object, shiny holds the final object (with any
+  # appOptions set after shinyApp() returned). From app.R, shiny has already
+  # applied those appOptions as global shiny options.
+  if (inherits(setup$appParts, "hotshiny.appobj")) app <- setup$appParts
+  test_mode <- isTRUE(shiny::getShinyOption("testmode", FALSE))
+  args <- list(app, port = setup$port, host = setup$host, launch.browser = setup$launch.browser,
+               quiet = setup$quiet, test.mode = test_mode)
+  shiny_internal("clearCurrentAppState")()
+  value <- do.call(runApp, args)
+  do.call("return", list(value), envir = run)
+}
+
+find_frame <- function(fn) {
+  for (i in rev(seq_len(sys.nframe()))) {
+    if (identical(sys.function(i), fn)) return(sys.frame(i))
+  }
+  NULL
 }
 
 #' @export
@@ -267,6 +307,9 @@ HotServer <- R6::R6Class("HotServer",
       if (is.null(shiny::getShinyOption("cache", default = NULL))) {
         shiny::shinyOptions(cache = cachem::cache_mem(max_size = 200 * 1024^2))
       }
+      # Options captured on the app object (golem's with_golem_options() puts
+      # golem_opts here) become app-level shiny options, as in shiny::runApp().
+      shiny_internal("applyCapturedAppOptions")(self$app$appOptions)
       if (length(self$app$options)) {
         shiny::shinyOptions(!!!self$app$options[setdiff(names(self$app$options), "port")])
       }
@@ -282,7 +325,11 @@ HotServer <- R6::R6Class("HotServer",
       }, add = TRUE)
 
       if (is.function(self$app$onStart)) self$app$onStart()
-      on.exit(shiny_internal(".globals")$onStopCallbacks$invoke(onError = print_error), add = TRUE)
+      on.exit({
+        globals <- shiny_internal(".globals")
+        globals$onStopCallbacks$invoke(onError = print_error)
+        globals$onStopCallbacks <- shiny_internal("Callbacks")$new()
+      }, add = TRUE)
 
       if (self$strict) enable_strict_mode()
       if (self$hot_reload) private$start_hot_reload()
