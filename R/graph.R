@@ -24,6 +24,8 @@ HsGraph <- R6::R6Class("HsGraph",
 
     # Register a node and return its stable id.
     add_node = function(type, label = NULL, ns = "", meta = list()) {
+      # Labels may carry srcref attributes (for showcase mode); nodes keep the text.
+      if (!is.null(label)) label <- as.character(label)
       base <- paste0(if (nzchar(ns %||% "")) paste0(ns, "/") else "", type, ":",
                      label %||% "<anon>")
       n <- (private$ordinals$get(base) %||% 0L) + 1L

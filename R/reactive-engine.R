@@ -153,6 +153,7 @@ HsContext <- R6::R6Class("Context",
       self$.domain <- domain
       self$node <- node
       self$graph <- graph
+      showcase_context_created(domain, label)
     },
 
     run = function(func) {

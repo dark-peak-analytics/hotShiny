@@ -140,6 +140,7 @@ reactive <- function(x, env = parent.frame(), quoted = FALSE, ..., label = NULL,
                      domain = shiny::getDefaultReactiveDomain(), ..stacktraceon = TRUE) {
   q <- capture_quo(rlang::enquo0(x), env, quoted, missing(env))
   if (is.null(label)) label <- infer_label(sys.call(), short_label("reactive", q))
+  label <- label_with_srcref(label, rlang::quo_get_expr(q), "reactive")
   new_reactive(quo_function(q), label, domain)
 }
 
