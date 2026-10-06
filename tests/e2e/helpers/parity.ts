@@ -43,6 +43,11 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
     for (const m of html.matchAll(/id="svg_([0-9a-f]{16})_rootg"/g)) {
       html = html.split(m[1]).join('girafe' + canon(m[1]));
     }
+    // shinyjs::onclick() names its hidden input with a random integer
+    html = html.replace(/(shinyjs-[\w-]+?-)(\d+)(-input-click)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
+    // shinybusy: random spinner ids and SpinKit class suffixes
+    html = html.replace(/(spin-)([0-9a-f]{24})\b/g, (_m, a, n) => `${a}${canon(n)}`);
+    html = html.replace(/(sk-[a-z]+-)([a-z]{12})\b/g, (_m, a, n) => `${a}${canon(n)}`);
     html = html.replace(/ui-tab-\d+/g, (m) => 'ui-tab-' + canon(m));
     html = html.replace(/(tab-)(\d{4})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(data-tabsetid=")(\d+)(")/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
