@@ -1,0 +1,14 @@
+Package: ecogolem
+Title: A Minimal Golem App for the hotShiny e2e Suite
+Version: 0.0.0.9000
+Authors@R: person("hotShiny", "tests", role = c("aut", "cre"), email = "tests@example.com")
+Description: A golem-style app package (layout of golem::create_golem())
+    used to check that golem apps run identically on shiny and hotShiny.
+License: MIT
+Imports:
+    config,
+    golem,
+    shiny
+Suggests:
+    pkgload
+Encoding: UTF-8

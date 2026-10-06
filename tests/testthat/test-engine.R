@@ -143,6 +143,14 @@ test_that("reactiveValues track keys, names and lists", {
   o$destroy()
 })
 
+test_that("reactiveValues keep insertion order, as shiny does", {
+  rv <- reactiveValues(zeta = 1, alpha = 2)
+  rv$mid <- 3
+  rv$alpha <- 4
+  expect_equal(isolate(names(rv)), c("zeta", "alpha", "mid"))
+  expect_equal(isolate(reactiveValuesToList(rv)), list(zeta = 1, alpha = 4, mid = 3))
+})
+
 test_that("objects carry shiny's classes", {
   expect_true(is.reactive(reactive(1)))
   expect_s3_class(reactive(1), "reactiveExpr")
