@@ -47,7 +47,7 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
       html = html.split(m[1]).join('plotly' + canon(m[1]));
     }
     // ...and every trace without an explicit uid a random one (class "trace<uid>")
-    html = html.replace(/(class="trace [a-z]+ trace)([0-9a-f]{6})"/g, (_m, a, u) => `${a}${canon(u)}"`);
+    html = html.replace(/(class="[^"]*\btrace)([0-9a-f]{6})(?=["\s])/g, (_m, a, u) => `${a}${canon(u)}`);
     // echarts stamps each instance with a timestamp id
     html = html.replace(/(_echarts_instance_="ec_)(\d+)"/g, (_m, a, n) => `${a}${canon(n)}"`);
     // highcharts containers get a random id per chart
