@@ -36,9 +36,7 @@ testServer <- function(app = NULL, expr, args = list(), session = MockShinySessi
   # attached shiny does not mask hotShiny (and this function) afterwards.
   pos <- match("package:hotShiny", search())
   if (!is.na(pos) && !"package:shiny" %in% search()) {
-    suppressPackageStartupMessages(
-      library("shiny", pos = pos + 1L, character.only = TRUE, warn.conflicts = FALSE)
-    )
+    suppressPackageStartupMessages(attachNamespace("shiny", pos = pos + 1L))
   }
   restore <- use_shiny_engine()
   on.exit(restore(), add = TRUE)

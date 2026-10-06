@@ -305,3 +305,47 @@ Plus the `shown`/`hidden` triggers used for visibility.
 - **shinytest2:** I agree it is a shim, but the `app.R`-calls-`hotShiny::runApp` fallback in section 2 may avoid it. I could not verify the internal launcher's name because shinytest2 is not installed.
 
 Assumptions: shiny 1.14.0 as installed at `/home/jesus/R/x86_64-pc-linux-gnu-library/4.6`. I checked these function bodies: `getDefaultReactiveDomain`, `withReactiveDomain`, `getShinyOption`/`shinyOptions`, `getCurrentTheme`, `isRunning`, `validate_session_object`, `processDeps`, `insertUI`, `showModal`, `invalidateLater`, `snapshotPreprocessInput`, `restoreInput`, `registerInputHandler`, `addResourcePath`, `observe`, `reactiveVal`, `isolate`, `req`. No files were modified.
+## 8. Verified results (e2e)
+
+Every package below has a fixture app in `tests/e2e/fixtures/eco-*` (written
+with `library(hotShiny)`), behaviour specs in `tests/e2e/specs/ecosystem/`
+and a parity spec in `tests/e2e/specs/parity/`. Each fixture runs under both
+runtimes:
+
+- **shiny**, after `publish_to_shiny()`;
+- **hotShiny**.
+
+The behaviour specs must pass in both runtimes. The parity specs require the
+normalised live DOM and the loaded dependencies to match, and at most 0.2% of
+pixels to differ.
+
+| Group | Packages | Status |
+|---|---|---|
+| htmlwidgets | DT (client + server-side processing, selection, editing, proxy, modules), plotly (event_data click/hover/relayout/selected, proxy, inside renderUI, bindCache), reactable, echarts4r, visNetwork, dygraphs, highcharter, ggiraph | pass |
+| UI frameworks | bslib (page_sidebar/page_navbar, navs, accordion, sidebar, input_switch, dark mode, setCurrentTheme, task button + ExtendedTask), shinydashboard, shinydashboardPlus, bs4Dash, shinythemes, fresh, thematic | pass |
+| Inputs | shinyWidgets (pickers, switches, airDatepicker, sliders, virtualSelect, update* without session, sweet alerts, modules), colourpicker, sortable, shinyjqui, rhandsontable, timevis, shinyAce, shiny.router, jsTreeR, shinyTree | pass |
+| UX helpers | shinyjs (incl. modules, extendShinyjs), shinycssloaders, waiter, shinybusy, shinyalert, shinyFeedback, shinyvalidate (two sessions), sever, shinytoastr, shinyhelper, rintrojs, cicerone, shiny.i18n | pass |
+| Frameworks / async / testing | promises + future, ExtendedTask, golem (with_golem_options), shinytest2 AppDriver on a hotShiny app, shinymanager, gt, logger, datamods | pass |
+| shiny's own examples | 01_hello … 11_timer (no 08 in shiny 1.14), including showcase mode | pass |
+| leaflet | — | not tested: leaflet could not be installed on the test machine (needs GDAL/udunits system libraries) |
+
+Core fixes these packages required, now in hotShiny:
+
+- static resource paths are served from httpuv's I/O thread, like shiny;
+- `shinyOptions(server =)` is set, so dependencies added at runtime are served;
+- the app-level `cache` defaults to the same 200MB memory cache as shiny's
+  (needed by `bindCache`);
+- `appOptions` are applied, which golem needs;
+- an output's domain is the module scope it was assigned in;
+- `reactiveValues` keep insertion order;
+- test-mode snapshots are shiny-compatible;
+- showcase mode and its srcrefs;
+- a hotShiny `testServer()` runs on shiny's `MockShinySession`.
+
+Parity normalisation only canonicalises ids that shiny or the widget
+libraries randomise on every render (session tokens, selectize/plotly/
+highcharts/girafe/gt/shinyjs/shinybusy ids). Content is never dropped.
+
+A few vendor races exist in plain shiny as well and can make a parity run
+flaky under heavy machine load: AdminLTE OverlayScrollbars in bs4Dash,
+bootstrap-select's aria attributes, and ion.rangeSlider label positions.
