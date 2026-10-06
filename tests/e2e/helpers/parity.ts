@@ -29,6 +29,20 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
     html = html.replace(/htmlwidget-[0-9a-f]{20}/g, (m) => 'htmlwidget-' + canon(m));
     // shinyWidgets' virtual-select numbers each instance randomly
     html = html.replace(/(vscomp-[a-z-]+-)(\d+)/g, (_m, a, n) => `${a}${canon('vscomp' + n)}`);
+    // plotly.js gives every graph a random 6-hex uid (defs-<uid>, clip<uid>xy...)
+    for (const m of html.matchAll(/id="defs-([0-9a-f]{6})"/g)) {
+      html = html.split(m[1]).join('plotly' + canon(m[1]));
+    }
+    // ...and every trace without an explicit uid a random one (class "trace<uid>")
+    html = html.replace(/(class="trace [a-z]+ trace)([0-9a-f]{6})"/g, (_m, a, u) => `${a}${canon(u)}"`);
+    // echarts stamps each instance with a timestamp id
+    html = html.replace(/(_echarts_instance_="ec_)(\d+)"/g, (_m, a, n) => `${a}${canon(n)}"`);
+    // highcharts containers get a random id per chart
+    html = html.replace(/(highcharts-)([a-z0-9]{7})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
+    // ggiraph's girafe() names every svg with a random 16-hex id
+    for (const m of html.matchAll(/id="svg_([0-9a-f]{16})_rootg"/g)) {
+      html = html.split(m[1]).join('girafe' + canon(m[1]));
+    }
     html = html.replace(/ui-tab-\d+/g, (m) => 'ui-tab-' + canon(m));
     html = html.replace(/(tab-)(\d{4})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(data-tabsetid=")(\d+)(")/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
