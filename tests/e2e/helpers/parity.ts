@@ -139,6 +139,24 @@ async function domQuiet(page: Page, quietMs = 600, timeout = 4000) {
 }
 
 /**
+ * Showcase mode lists the app's source. The reference runs the app as
+ * converted by publish_to_shiny(), whose only change to these fixtures is
+ * library(hotShiny) -> library(shiny); undo exactly that token in the listing
+ * (DOM and pixels) so the rest of the source still has to match.
+ */
+async function canonicalizeShowcaseSource(page: Page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('#showcase-code-content .identifier').forEach((el) => {
+      const prev = el.previousElementSibling;
+      const fn = prev?.previousElementSibling;
+      if (el.textContent === 'hotShiny' && prev?.textContent === '(' && fn?.textContent === 'library') {
+        el.textContent = 'shiny';
+      }
+    });
+  });
+}
+
+/**
  * Declare a parity test for a fixture: it is rendered by plain shiny (the
  * reference, produced by publish_to_shiny()) and by hotShiny; the live DOM
  * after shiny.js has initialised, the loaded dependencies, and the pixels
@@ -147,7 +165,7 @@ async function domQuiet(page: Page, quietMs = 600, timeout = 4000) {
 export function parityTest(
   fixture: string,
   ready: (page: Page) => Promise<void> = async () => {},
-  opts: { maxPixelDiff?: number } = {},
+  opts: { maxPixelDiff?: number; seed?: number } = {},
 ) {
   test.describe(`parity: ${fixture}`, () => {
     let ref: RunningApp;
@@ -155,8 +173,8 @@ export function parityTest(
 
     test.beforeAll(async () => {
       [ref, hot] = await Promise.all([
-        startApp({ runtime: 'shiny', fixture }),
-        startApp({ runtime: 'hotshiny', fixture }),
+        startApp({ runtime: 'shiny', fixture, seed: opts.seed }),
+        startApp({ runtime: 'hotshiny', fixture, seed: opts.seed }),
       ]);
     });
     test.afterAll(async () => {
@@ -168,6 +186,22 @@ export function parityTest(
       await waitForIdle(page);
       await ready(page);
       await waitForIdle(page);
+      // jQuery effects (e.g. showcase mode's code highlighting) run on timers
+      // the CSS override below cannot stop; let them finish. The first flush
+      // can arrive just after waitForIdle() returns, so require a quiet
+      // window rather than a single animation-free instant.
+      await page.waitForFunction(
+        () => {
+          const w = window as any;
+          const now = performance.now();
+          if (w.jQuery && w.jQuery(':animated').length > 0) w.__hsLastAnimated = now;
+          w.__hsLastAnimated ??= now;
+          return now - w.__hsLastAnimated > 500;
+        },
+        null,
+        { polling: 50 },
+      );
+      await canonicalizeShowcaseSource(page);
       await page.addStyleTag({
         content: '*,*::before,*::after{transition:none!important;animation:none!important;caret-color:transparent!important}',
       });

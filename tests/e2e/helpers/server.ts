@@ -46,6 +46,8 @@ export interface StartOptions {
   fixture: string;
   hotReload?: boolean;
   timeoutMs?: number;
+  /** set.seed() before the app is loaded, for fixtures that draw random numbers. */
+  seed?: number;
 }
 
 /**
@@ -64,7 +66,15 @@ export async function startApp(opts: StartOptions): Promise<RunningApp> {
   const proc: ChildProcess = spawn(
     'Rscript',
     [LAUNCHER, opts.runtime, dir, String(port), opts.hotReload ? 'true' : 'false'],
-    { cwd: dir, env: { ...process.env, R_LIBS_USER: process.env.R_LIBS_USER ?? '' }, stdio: ['ignore', 'pipe', 'pipe'] },
+    {
+      cwd: dir,
+      env: {
+        ...process.env,
+        R_LIBS_USER: process.env.R_LIBS_USER ?? '',
+        ...(opts.seed !== undefined ? { HS_E2E_SEED: String(opts.seed) } : {}),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
   );
   proc.stdout?.on('data', (d) => (out += d.toString()));
   proc.stderr?.on('data', (d) => (out += d.toString()));

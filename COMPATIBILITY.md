@@ -47,7 +47,24 @@ the same extension packages working.
   - test-mode snapshots.
 - **The app runner**: `runApp()`, `shinyApp()`, `shinyAppDir()`,
   `shinyAppFile()`, `stopApp()` and `isRunning()`. App objects are regular
-  `shiny.appobj`s.
+  `shiny.appobj`s. As in shiny, an app given by path runs from its directory,
+  and its display mode comes from `display.mode` or `DisplayMode: Showcase` in
+  its `DESCRIPTION`.
+- **Showcase mode**: the page is shiny's own showcase layout; the session
+  sends shiny's `showcase-src` messages so the code of each reactive
+  expression and output is highlighted as it runs. App files are parsed the
+  way shiny parses them, so the source references (and the element ids the
+  page derives from them) are the same. Not applied to the hot-reload dev
+  page.
+
+## Testing with `testServer()`
+
+`testServer()` drives a server function through shiny's `MockShinySession`,
+which is wired to shiny's engine (its own flush and mock clock). hotShiny's
+`testServer()` therefore runs the code on shiny's engine, exactly as for an
+app written with `library(shiny)`: while the test runs, hotShiny's reactive
+primitives (including `hotShiny::reactive()` and packages importing them) are
+pointed at shiny's. It cannot be used while a hotShiny app is running.
 
 ## The bridge
 

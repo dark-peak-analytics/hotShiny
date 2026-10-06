@@ -15,6 +15,10 @@ hot_reload <- length(args) >= 4 && tolower(args[[4]]) == "true"
 
 options(shiny.launch.browser = FALSE, warn = 1)
 
+# Fixtures that draw random numbers get the same RNG stream in both runtimes.
+seed <- Sys.getenv("HS_E2E_SEED")
+if (nzchar(seed)) set.seed(as.integer(seed))
+
 if (identical(runtime, "shiny")) {
   out_dir <- file.path(tempfile("published-"), basename(app_dir))
   if (requireNamespace("hotShiny", quietly = TRUE) &&

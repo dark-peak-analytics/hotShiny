@@ -17,7 +17,7 @@ new_output_writer <- function(session, ns = identity) {
 #' @export
 `$<-.hs_shinyoutput` <- function(x, name, value) {
   name <- .subset2(x, "ns")(name)
-  label <- deparse(substitute(value))[1]
+  label <- output_label_srcref(deparse(substitute(value))[1], substitute(value))
   .subset2(x, "impl")$defineOutput(name, value, label)
   invisible(x)
 }
@@ -42,6 +42,15 @@ new_output_writer <- function(session, ns = identity) {
 
 #' @export
 `[<-.hs_shinyoutput` <- function(x, i, value) rlang::abort("Can't index shinyoutput with `[`.")
+
+# The label of an output's observer: "output$<name>", keeping the source
+# reference of the render call it was assigned from.
+output_label <- function(name, label) {
+  out <- paste0("output$", name)
+  attr(out, "srcref") <- attr(label, "srcref")
+  attr(out, "srcfile") <- attr(label, "srcfile")
+  out
+}
 
 # An upload in progress: files posted to session/<token>/upload/<job>.
 UploadJob <- R6::R6Class("HsUploadJob",
@@ -144,6 +153,7 @@ HotSession <- R6::R6Class("HotSession",
       private$destroy_cbs <- list()
       private$test_mode <- isTRUE(app$test_mode)
       private$theme_dep <- shiny::withReactiveDomain(self, ReactiveVal$new(0, "theme counter"))
+      self$setShowcase(shiny_internal(".globals")$showcaseDefault)
       if (private$test_mode) private$enable_test_snapshot()
 
       creds <- ws$request$HTTP_SHINY_SERVER_CREDENTIALS
@@ -268,7 +278,10 @@ HotSession <- R6::R6Class("HotSession",
 
     isClosed = function() isTRUE(self$closed),
     isEnded = function() self$isClosed(),
-    setShowcase = function(value) invisible(NULL),
+    setShowcase = function(value) {
+      private$showcase <- !is.null(value) && isTRUE(as.logical(value))
+      invisible(NULL)
+    },
 
     allowReconnect = function(value) {
       if (!(identical(value, TRUE) || identical(value, FALSE) || identical(value, "force"))) {
@@ -400,7 +413,7 @@ HotSession <- R6::R6Class("HotSession",
           private$finish_output(name, value)
         }
         invisible(NULL)
-      }, label = paste0("output$", name), suspended = private$should_suspend(name),
+      }, label = output_label(name, label), suspended = private$should_suspend(name),
       # The domain current where the output is assigned (a module's session
       # proxy inside moduleServer()), as in shiny: render code that calls
       # getDefaultReactiveDomain()$ns() must get the module's namespace.
@@ -673,7 +686,12 @@ HotSession <- R6::R6Class("HotSession",
     onRestore = function(fun) invisible(function() NULL),
     onRestored = function(fun) invisible(function() NULL),
     doBookmark = function() invisible(NULL),
-    reactlog = function(logEntry) invisible(NULL),
+    reactlog = function(logEntry) {
+      if (private$showcase && !is.null(logEntry$srcref) && !is.null(logEntry$srcfile)) {
+        self$sendCustomMessage("showcase-src", list(srcref = logEntry$srcref, srcfile = logEntry$srcfile))
+      }
+      invisible(NULL)
+    },
 
     # -- hot reload support ----------------------------------------------------------
 
@@ -699,6 +717,7 @@ HotSession <- R6::R6Class("HotSession",
 
   private = list(
     ws = NULL,
+    showcase = FALSE,
     input_impl = NULL,
     clientdata_impl = NULL,
     outputs = NULL,

@@ -103,9 +103,7 @@ source_app_file <- function(file) {
   env <- new.env(parent = globalenv())
   old_wd <- setwd(dirname(file))
   on.exit(setwd(old_wd), add = TRUE)
-  exprs <- parse(file, keep.source = TRUE, encoding = "UTF-8")
-  value <- NULL
-  for (e in exprs) value <- withVisible(eval(e, env))$value
+  value <- eval(parse_app_file(file), env)
   if (!inherits(value, "shiny.appobj")) {
     if (is.list(value) && !is.null(value$ui) && !is.null(value$server)) {
       value <- shinyApp(value$ui, value$server)
@@ -115,6 +113,19 @@ source_app_file <- function(file) {
     }
   }
   as_hotshiny_app(value)
+}
+
+# Parse an app file into one `{` block (evaluating it yields the value of the
+# last expression) with the source references shiny gives app code: shiny
+# wraps app files in a one-line call plus a `#line` directive, which shifts
+# the parse-line fields of every srcref by two. Showcase mode sends those
+# srcrefs to the page, which builds element ids from them.
+parse_app_file <- function(file) {
+  lines <- readLines(file, encoding = "UTF-8", warn = FALSE)
+  file_norm <- normalizePath(file, mustWork = TRUE, winslash = "/")
+  lines <- c("{", sprintf('#line 1 "%s"', file_norm), lines, "}")
+  src <- srcfilecopy(file, lines, isFile = TRUE)
+  parse(text = lines, keep.source = FALSE, srcfile = src, encoding = "UTF-8")[[1]]
 }
 
 # Load app.R, or the ui.R/server.R(/global.R) layout.
@@ -132,11 +143,7 @@ load_app_dir <- function(dir) {
   env <- new.env(parent = globalenv())
   old_wd <- setwd(dir)
   on.exit(setwd(old_wd), add = TRUE)
-  src <- function(f) {
-    value <- NULL
-    for (e in parse(f, keep.source = TRUE, encoding = "UTF-8")) value <- withVisible(eval(e, env))$value
-    value
-  }
+  src <- function(f) eval(parse_app_file(f), env)
   if (file.exists(file.path(dir, "global.R"))) src(file.path(dir, "global.R"))
   ui <- if (file.exists(ui_file)) src(ui_file) else NULL
   server <- src(server_file)
@@ -203,6 +210,13 @@ runApp <- function(appDir = getwd(),
   # so reactives created at the top level of app.R/global.R live on our engine.
   install_bridge()
   on.exit(uninstall_bridge(), add = TRUE)
+
+  # Like shiny, only an app given by path picks its display mode from its
+  # DESCRIPTION file.
+  desc_dir <- if (is.character(appDir) && length(appDir) == 1) {
+    if (tolower(tools::file_ext(appDir)) == "r") dirname(appDir) else appDir
+  }
+  setup_showcase(desc_dir, display.mode)
 
   app <- if (inherits(appDir, "shiny.appobj")) {
     as_hotshiny_app(appDir)
@@ -323,6 +337,14 @@ HotServer <- R6::R6Class("HotServer",
         .hs_server$running <- FALSE
         .hs_server$current <- NULL
       }, add = TRUE)
+
+      # shiny runs apps loaded from a directory or file from that directory
+      # (relative paths in server code, showcase's code listing).
+      app_dir <- self$app$hotshiny$appDir
+      if (!is.null(app_dir)) {
+        old_wd <- setwd(app_dir)
+        on.exit(setwd(old_wd), add = TRUE)
+      }
 
       if (is.function(self$app$onStart)) self$app$onStart()
       on.exit({
@@ -466,6 +488,8 @@ HotServer <- R6::R6Class("HotServer",
         msg$data <- shiny_internal("applyInputHandlers")(msg$data, session)
         switch(msg$method,
           init = {
+            mode <- showcase_mode_of_query(msg$data$.clientdata_url_search)
+            if (!is.null(mode)) session$setShowcase(mode)
             session$manageInputs(msg$data, now = TRUE)
             if (!is.null(msg$data$.clientdata_singletons)) {
               session$singletons <- strsplit(msg$data$.clientdata_singletons, ",")[[1]]
