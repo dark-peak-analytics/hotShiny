@@ -262,6 +262,11 @@ HotServer <- R6::R6Class("HotServer",
     run = function(host, port, launch.browser = FALSE, quiet = FALSE) {
       shiny_internal("initCurrentAppState")(self$app)
       on.exit(shiny_internal("clearCurrentAppState")(), add = TRUE)
+      # bindCache(cache = "app"), the default, resolves to this option; shiny
+      # provides the same 200MB memory cache unless the app configured one.
+      if (is.null(shiny::getShinyOption("cache", default = NULL))) {
+        shiny::shinyOptions(cache = cachem::cache_mem(max_size = 200 * 1024^2))
+      }
       if (length(self$app$options)) {
         shiny::shinyOptions(!!!self$app$options[setdiff(names(self$app$options), "port")])
       }
