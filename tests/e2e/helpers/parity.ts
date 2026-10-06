@@ -25,6 +25,10 @@ export async function normalizedDom(page: Page): Promise<{ body: string; head: s
     for (const m of html.matchAll(/aria-owns="([a-z0-9]{6,})"/g)) {
       html = html.split(m[1]).join('selectize-' + canon(m[1]));
     }
+    // htmlwidgets gives statically rendered widgets a random id
+    html = html.replace(/htmlwidget-[0-9a-f]{20}/g, (m) => 'htmlwidget-' + canon(m));
+    // shinyWidgets' virtual-select numbers each instance randomly
+    html = html.replace(/(vscomp-[a-z-]+-)(\d+)/g, (_m, a, n) => `${a}${canon('vscomp' + n)}`);
     html = html.replace(/ui-tab-\d+/g, (m) => 'ui-tab-' + canon(m));
     html = html.replace(/(tab-)(\d{4})(-\d+)/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
     html = html.replace(/(data-tabsetid=")(\d+)(")/g, (_m, a, n, b) => `${a}${canon(n)}${b}`);
