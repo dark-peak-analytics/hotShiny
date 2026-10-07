@@ -99,8 +99,8 @@ shinyAppFile <- function(appFile, options = list()) {
 }
 
 # Source an app file in a fresh environment; its value must be an app object.
-source_app_file <- function(file) {
-  env <- new.env(parent = globalenv())
+source_app_file <- function(file, parent = globalenv()) {
+  env <- new.env(parent = parent)
   old_wd <- setwd(dirname(file))
   on.exit(setwd(old_wd), add = TRUE)
   value <- eval(parse_app_file(file), env)
@@ -128,11 +128,26 @@ parse_app_file <- function(file) {
   parse(text = lines, keep.source = FALSE, srcfile = src, encoding = "UTF-8")[[1]]
 }
 
+# Source an app directory's support files the way shiny::runApp() does: the
+# R/ folder (unless options(shiny.autoload.r = FALSE)) into `env`, and, for the
+# ui.R/server.R layout, global.R into the global environment.
+load_app_support <- function(dir, env, global) {
+  globalrenv <- if (global) globalenv() else NULL
+  if (isTRUE(getOption("shiny.autoload.r", TRUE))) {
+    shiny::loadSupport(dir, renv = env, globalrenv = globalrenv)
+  } else if (global && file.exists(file.path(dir, "global.R"))) {
+    sys.source(file.path(dir, "global.R"), envir = globalenv(), keep.source = TRUE)
+  }
+  invisible(env)
+}
+
 # Load app.R, or the ui.R/server.R(/global.R) layout.
 load_app_dir <- function(dir) {
+  shared <- new.env(parent = globalenv())
   app_file <- file.path(dir, "app.R")
   if (file.exists(app_file)) {
-    app <- source_app_file(app_file)
+    load_app_support(dir, shared, global = FALSE)
+    app <- source_app_file(app_file, parent = shared)
     app$hotshiny$appFile <- app_file
     app$hotshiny$appDir <- dir
     return(app)
@@ -140,11 +155,11 @@ load_app_dir <- function(dir) {
   ui_file <- file.path(dir, "ui.R")
   server_file <- file.path(dir, "server.R")
   if (!file.exists(server_file)) stop("No app.R or server.R found in ", dir, call. = FALSE)
-  env <- new.env(parent = globalenv())
+  load_app_support(dir, shared, global = TRUE)
+  env <- new.env(parent = shared)
   old_wd <- setwd(dir)
   on.exit(setwd(old_wd), add = TRUE)
   src <- function(f) eval(parse_app_file(f), env)
-  if (file.exists(file.path(dir, "global.R"))) src(file.path(dir, "global.R"))
   ui <- if (file.exists(ui_file)) src(ui_file) else NULL
   server <- src(server_file)
   if (is.null(ui) && file.exists(file.path(dir, "www", "index.html"))) {
