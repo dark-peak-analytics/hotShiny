@@ -1,135 +1,101 @@
-# hotShiny ↔ Shiny Compatibility
+# hotShiny ↔ shiny compatibility
 
-This document describes how compatible hotShiny is with Shiny today, what works,
-what fails gracefully, and the architectural limits that the `shiny2hotshiny`
-translator exists to bridge.
+Goal: an app runs identically whichever of `library(hotShiny)` or
+`library(shiny)` it loads. That means the same markup, the same behaviour, and
+the same extension packages working.
 
-The north star: you should be able to replace `library(shiny)` with
-`library(hotShiny)` and have an app either **work** or **fail loudly with
-guidance** — never silently do the wrong thing.
+## What is identical by construction
 
-## Compatibility levels
+- **UI**: every UI function, renderer and helper is shiny's own, re-exported.
+  The exceptions are the input functions that additionally accept extra HTML
+  attributes; with no extra arguments they return shiny's markup unchanged.
+- **Client**: the browser runs the real `shiny.js`, jQuery, selectize,
+  ion.rangeSlider and bootstrap-datepicker, served from the installed shiny
+  package. Input/output bindings, `Shiny.*` APIs and `shiny:*` events are
+  therefore shiny's.
+- **Wire protocol**: the server speaks shiny's messages:
+  - `init`/`update`, using shiny's input handlers;
+  - `config`, `busy`, `recalculating`, `progress`;
+  - `values`/`errors`/`inputMessages` per flush;
+  - `custom`, `modal`, `notification`, `shiny-insert-ui` and friends;
+  - `response`.
 
-| Level | Status | Notes |
-|-------|--------|-------|
-| Syntax compatibility | ✅ | `reactive()`, `observe()`, `render*()`, UI tags, inputs, layouts |
-| Behavioural equivalence | ⚠️ Mostly | Some edge cases differ (see Limitations) |
-| Execution semantics | ❌ By design | hotShiny builds a static, diffable reactive graph |
+  JSON is encoded with shiny's own encoder.
+- **Page rendering**: shiny's `renderPage()`, with dependencies registered
+  through shiny's resource-path registry.
 
-hotShiny keeps Shiny's **API surface** while changing the **runtime** — the same
-trade-off React→Preact or Vue→Solid make. That is what enables hot reload, graph
-diffing and time-travel debugging.
+## Re-implemented with shiny's semantics
 
-## What works
+- **The reactive engine**:
+  - `reactive`, `observe`, `observeEvent`, `eventReactive`, `bindEvent`;
+  - `reactiveVal`, `reactiveValues`, `isolate`;
+  - `invalidateLater`, `reactiveTimer`, `debounce`, `throttle`;
+  - `reactivePoll`, `reactiveFileReader`, `freezeReactiveVal`,
+    `makeReactiveBinding`.
 
-### App entry points
-- `app(ui, server)` (native) and `shinyApp(ui, server)` (alias)
-- `shinyServer()`, `shinyUI()` (legacy constructors)
-- `runApp("app.R")` and `runApp("appdir/")`
-- `stopApp()`
+  Dependencies are tracked dynamically. Objects carry shiny's classes
+  (`reactiveExpr`, `reactiveVal`, `Observer`, `reactivevalues`) and internal
+  shapes (`.subset2(x, "impl")`, `attr(x, ".impl")`).
+- **The session** (one per browser): the full `ShinySession` surface. It
+  covers:
+  - module scopes;
+  - output definition with silent/validation/cancel/progress conditions;
+  - `getCurrentOutputInfo()`, `onFlush`/`onFlushed`, `onSessionEnded`;
+  - `sendCustomMessage`/`sendInputMessage`;
+  - uploads, downloads and `registerDataObj()`;
+  - `setCurrentTheme()`, `freezeValue()`, `reload()`, `close()`;
+  - test-mode snapshots.
+- **The app runner**: `runApp()`, `shinyApp()`, `shinyAppDir()`,
+  `shinyAppFile()`, `stopApp()` and `isRunning()`. App objects are regular
+  `shiny.appobj`s. As in shiny, an app given by path runs from its directory,
+  and its display mode comes from `display.mode` or `DisplayMode: Showcase` in
+  its `DESCRIPTION`.
+- **Showcase mode**: the page is shiny's own showcase layout; the session
+  sends shiny's `showcase-src` messages so the code of each reactive
+  expression and output is highlighted as it runs. App files are parsed the
+  way shiny parses them, so the source references (and the element ids the
+  page derives from them) are the same. Not applied to the hot-reload dev
+  page.
 
-### Reactivity
-- `reactive()`, `observe()`, `observeEvent()`
-- `isolate()` — fully supported (dependency tracking is suppressed statically)
-- `req()`, `validate()` / `need()`, `isTruthy()`, `safeError()` — silent-error
-  semantics; a failed `req()` blanks the output as in Shiny
-- `eventReactive()` — supported (see precision note under Limitations)
-- `reactiveValues()`, `reactiveVal()` — full read **and write**, including
-  writes from inside observers (e.g. the counter pattern
-  `observeEvent(input$go, { rv(rv() + 1) })`)
-- `reactiveValuesToList()`, `is.reactive()`, `freezeReactiveValue()`
-- User-defined helper functions and variables declared in the server body are
-  reachable from reactive/render/observer expressions (the evaluation
-  environment is parented to the captured server closure)
+## Testing with `testServer()`
 
-### The `session` object (third server argument)
-Previously `NULL`; now a real object implementing:
-- `session$ns()` (modules)
-- `session$sendCustomMessage()` / `sendInputMessage()`
-- `session$userData`, `session$clientData`
-- `session$onSessionEnded()`, `onFlush()`, `onFlushed()`
-- `session$reload()`, `session$setInputValue()`
-- `getDefaultReactiveDomain()` returns the active session
+`testServer()` drives a server function through shiny's `MockShinySession`,
+which is wired to shiny's engine (its own flush and mock clock). hotShiny's
+`testServer()` therefore runs the code on shiny's engine, exactly as for an
+app written with `library(shiny)`: while the test runs, hotShiny's reactive
+primitives (including `hotShiny::reactive()` and packages importing them) are
+pointed at shiny's. It cannot be used while a hotShiny app is running.
 
-This also fixed hotShiny's own `showModal()`, `showNotification()`, `insertUI()`
-etc., which all call `session$sendCustomMessage()`.
+## The bridge
 
-### Modules
-- `NS()`, `moduleServer()`, `callModule()`
-- A namespace becomes an id prefix (`mod-x`), matching Shiny
+While a hotShiny app runs, shiny's reactive primitives are replaced by
+hotShiny's in three places:
 
-### Inputs
-- `input$x` is `NULL` until the client reports it (was `""`)
-- Values are restored to natural R types: `"TRUE"`→logical, `"30"`→numeric
-- Multi-value inputs return vectors: `checkboxGroupInput`,
-  `selectInput(multiple = TRUE)`, `sliderInput` ranges
-- `registerInputHandler()` / `removeInputHandler()` registry
+- shiny's namespace;
+- `package:shiny`;
+- every loaded package's imports.
 
-### Static assets & the browser-side `Shiny` object
-- `addResourcePath()` / `removeResourcePath()` serve files (htmlwidgets etc.)
-- `shiny-compat.js` exposes a browser `Shiny` object:
-  `Shiny.setInputValue`, `Shiny.addCustomMessageHandler`,
-  `Shiny.inputBindings`/`outputBindings.register`, `Shiny.bindAll`/`unbindAll`,
-  and `shiny:connected` / `shiny:sessioninitialized` / `shiny:bound` events
+So `shiny::observe()`, shiny's own `renderPlot()`/`bindCache()`/`ExtendedTask`,
+and extension packages all run on hotShiny's engine. The originals are restored
+when the app stops. Package-specific substitutes use the same mechanism
+(`register_substitute()`).
 
-### Utilities
-- `parseQueryString()`, `shinyOptions()`, `getShinyOption()`, `onStop()`
+## Not supported
 
-## Fails gracefully (catchable `hotshiny_unsupported` error)
+- **Bookmarking.** The functions exist so apps that configure it still run,
+  but state is not saved or restored. `shiny2hotshiny_check()` lists
+  bookmarking calls.
+- **reactlog.** Use `visualize_graph()` and `reactive_history()` instead.
 
-These raise an informative error rather than `could not find function`:
-bookmarking (`enableBookmarking`, `bookmarkButton`, `onBookmark`, …),
-`bindCache`, `ExtendedTask`, `reactivePoll`, `reactiveFileReader`,
-`exportTestValues`, `markRenderFunction`, `runExample`/`runGist`/`runGitHub`/`runUrl`.
+## Verified
 
-## Known limitations (and why)
-
-hotShiny extracts the reactive graph **statically** from the expression AST.
-Patterns whose dependencies only exist at runtime cannot be analysed:
-
-1. **Computed input/output ids** — `input[[paste0("x", i)]]`. Literal-string
-   subscripts (`input[["x"]]`) are tracked; computed ones are not. Enumerate the
-   ids explicitly.
-2. **Reactives/observers/outputs created in loops or `lapply`** over runtime
-   data — their dependencies cannot be extracted.
-3. **Precision of reactive-value invalidation** — writes to
-   `reactiveVal`/`reactiveValues` work (including from observers), but because
-   their *reads* are not detected as static dependency edges, hotShiny refreshes
-   conservatively: on any such write it re-evaluates **all** reactive and render
-   nodes (correct, less precise than Shiny's targeted invalidation). Observers
-   are not re-run by this pass, so an observer that only *reads* a reactive value
-   (without an `input$`/event dependency) will not re-fire on that value's change.
-4. **Timers** (`invalidateLater`, `reactiveTimer`) re-run all computed nodes
-   rather than only the calling context.
-5. **`debounce`/`throttle`/`bindCache`** are currently pass-through shims (no
-   rate-limiting / caching yet).
-6. **Client protocol** is hotShiny's own; ecosystem JS works via `shiny-compat.js`.
-   Note hotShiny ships **Bootstrap 5** while classic Shiny markup targets
-   Bootstrap 3 — `shinydashboard` and some `bslib` theming are not yet supported.
-
-## The translator: `shiny2hotshiny`
-
-Where a pattern can't just run, find it ahead of time:
-
-```r
-# Lint mode — classify every finding as ok / auto / manual, with file:line
-shiny2hotshiny_check("path/to/app")        # file or directory
-
-# Rewrite mode — apply mechanical edits, insert `# TODO(hotShiny):` comments
-shiny2hotshiny_translate("app.R", "app.hotshiny.R")
-```
-
-`check()` reports: `library(shiny)` swaps (auto), unsupported functions (manual),
-computed ids (manual), loop-created reactives (manual), reduced-precision
-constructs (manual). `translate()` swaps the library call and annotates the
-manual sites in place.
-
-## Roadmap
-
-- [ ] Depend on `htmltools` for tags + `htmlDependency` resolution (replace the
-      hand-rolled tag layer; auto-inject widget dependencies)
-- [ ] Precise invalidation for `reactiveVal`/`reactiveValues`
-- [ ] Real `debounce`/`throttle`/`bindCache`
-- [ ] Per-client sessions (currently one shared app-scoped session)
-- [ ] Bootstrap 3 markup mode for `shinydashboard`
-- [ ] Compatibility scoreboard: run Shiny's bundled example apps unmodified
+- `tests/e2e` (Playwright): every fixture runs under plain shiny and under
+  hotShiny.
+  - **Behaviour** specs must pass in both runtimes.
+  - **Parity** specs require the same normalised live DOM, the same
+    dependencies, and a pixel difference of at most 0.2%. Normalisation only
+    canonicalises ids that shiny randomises per render.
+  - **Hot-reload** specs cover in-place updates, state preservation, new
+    dependencies, error recovery and no disconnects.
+- See [docs/ECOSYSTEM_COMPAT.md](docs/ECOSYSTEM_COMPAT.md) for the
+  extension-package inventory and the e2e matrix.

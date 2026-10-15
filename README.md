@@ -1,288 +1,162 @@
 # hotShiny
 
-https://shiny.posit.co/r/reference/shiny/1.6.0/
+A drop-in replacement for [shiny](https://shiny.posit.co/r/) with **hot reload**,
+an inspectable **reactive graph**, **strict mode** and **time-travel**
+debugging.
 
-A Shiny-compatible R package that supports hot-reloading by transforming Shiny's execution model into a declarative, diffable reactive graph. Maintains API compatibility while fundamentally changing runtime semantics.
-
-## Features
-
-- **Hot Reload**: Preserve application state while reloading code changes, morphing the DOM in place so only changed nodes update (no full-page flash, inputs and scroll position are preserved)
-- **Graph-Based Reactivity**: Reactive expressions are represented as a versioned, diffable graph
-- **Shiny-Compatible API**: Most Shiny apps work without modification
-- **Tailwind CSS Support**: First-class [`shiny.tailwind`](https://github.com/kylebutts/shiny.tailwind) compatibility, head/dependency hoisting, an opt-out for the built-in Bootstrap, and utility classes straight on inputs (e.g. `textInput("name", NULL, class = "border rounded-xl")`)
-- **Modern Client**: Vanilla JavaScript client with DOM diffing
-- **Strict Mode**: Detect side effects and non-deterministic code
-- **Time-Travel Debugging**: Replay reactivity and inspect graph history
+An app written for hotShiny is a shiny app: swap `library(hotShiny)` for
+`library(shiny)` (or let `publish_to_shiny()` do it) and it runs unchanged.
+The reverse holds too: shiny apps run on hotShiny unmodified.
 
 ## Installation
 
 ```r
-# Install from source
-devtools::install_github("dark-peak-analytics/hotShiny")
-
-#or
-pak::pak("dark-peak-analytics/hotShiny") 
+pak::pak("dark-peak-analytics/hotShiny")
 ```
 
-## Quick Start
+## Quick start
+
+Write a normal shiny app:
 
 ```r
+# app.R
 library(hotShiny)
 
-ui <- function() {
-  div(
-    h1("Hello HotShiny"),
-    textInput("name", "Name:"),
-    textOutput("greeting")
-  )
-}
+ui <- fluidPage(
+  textInput("name", "Name:"),
+  textOutput("greeting")
+)
 
 server <- function(input, output, session) {
-  greeting <- reactive({
-    paste("Hello,", input$name)
-  })
-  
-  output$greeting <- renderText({
-    greeting()
-  })
+  greeting <- reactive(paste("Hello,", input$name))
+  output$greeting <- renderText(greeting())
 }
 
-app_obj <- app(ui, server)
-
-# Enable hot reload (development)
-enable_hot_reload(app_obj)
-
-# Run app
-app_obj$runApp()
+shinyApp(ui, server)
 ```
 
-## Styling with Tailwind CSS
-
-hotShiny is compatible with the [`shiny.tailwind`](https://github.com/kylebutts/shiny.tailwind)
-package and adds a few conveniences for styling apps with Tailwind utility
-classes.
-
-### 1. Add utility classes to any UI function
-
-Every input/UI function accepts extra attributes via `...`. The most useful is
-`class`, which is **appended** to the element's base class rather than replacing
-it — so you can attach Tailwind utilities directly, no wrapper `div` required:
+Run it with hot reload on:
 
 ```r
-ui <- function() {
-  div(
-    textInput("name", NULL, class = "border rounded-xl w-full px-3 py-2"),
-    actionButton("go", "Submit", class = "px-4 py-2 bg-blue-600 text-white rounded-lg"),
-    selectInput("opt", "Choose", c("a", "b"), class = "ring-2 ring-blue-300")
-  )
-}
+hotShiny::runApp("app.R", hot_reload = TRUE)
 ```
 
-For single-control inputs the class lands on the control itself
-(`<input>`/`<select>`/`<textarea>`); for grouped inputs (`radioButtons`,
-`checkboxGroupInput`) it lands on the group container. Any other attribute
-(`style`, `data-*`, `aria-*`, …) is forwarded the same way.
+Edit `app.R` and save. The page updates in place without a refresh. Inputs,
+`reactiveVal()` and `reactiveValues()` state, and scroll position are kept.
 
-### 2. Quick start — browser JIT (no build step)
+Development features are switched on by the launcher, never inside the app
+file, so the file stays plain shiny:
 
-`use_tailwind()` loads Tailwind's in-browser JIT compiler from a CDN. hotShiny
-automatically hoists its `<script>`/`<style>` into the page `<head>`, and because
-hot reload only morphs the app body, the compiler keeps running and restyles new
-classes instantly on every reload. Set `bootstrap = FALSE` so Tailwind's
-preflight reset has a clean slate:
+| Feature | `runApp()` argument | Option |
+|---|---|---|
+| Hot reload | `hot_reload = TRUE` | `hotshiny.hot_reload` |
+| Strict mode (warn about side effects in `reactive()`) | `strict = TRUE` | `hotshiny.strict` |
+| Reactive history / time travel | `time_travel = TRUE` | `hotshiny.time_travel` |
+| Tailwind CSS without code changes | `tailwind = TRUE` | `hotshiny.tailwind` |
+
+## How it works
+
+- **UI, client and protocol are shiny's.** Every UI function, renderer and
+  helper is re-exported from shiny, so markup is byte-identical. The browser
+  runs the real `shiny.js`, and the server speaks shiny's websocket protocol.
+  Extension packages (htmlwidgets, DT, plotly, bslib, shinyWidgets, shinyjs, …)
+  therefore render and behave as they do on shiny.
+- **The reactive engine is hotShiny's.** It follows shiny's semantics:
+  dependencies are tracked dynamically, reactives are lazy and cached,
+  observers run in priority order, and so on. It also records each session's
+  reactive graph with stable node ids, which is what hot reload, graph
+  inspection and time travel are built on.
+- **A bridge keeps the ecosystem on one engine.** While a hotShiny app runs,
+  shiny's reactive primitives are routed to hotShiny's. That covers calls from
+  inside shiny's namespace, from `package:shiny`, and from packages that
+  imported them. As a result, code that calls `shiny::observe()`,
+  `shiny::reactiveVal()` and so on (shiny's own `renderPlot()`, `bindCache()`,
+  `ExtendedTask`, and many extension packages) runs on hotShiny's engine.
+  Packages that need more get a package-specific substitute, applied when the
+  package is detected (`register_substitute()`). See
+  [docs/ECOSYSTEM_COMPAT.md](docs/ECOSYSTEM_COMPAT.md).
+- **Each browser has its own session.** The session implements the full
+  `ShinySession` surface: modules, uploads, downloads, data objects,
+  `setCurrentTheme()`, test snapshots and more.
+
+### Hot reload
+
+When a source file changes, hotShiny:
+
+1. re-loads the app;
+2. snapshots every session's `reactiveVal()` / `reactiveValues()` state by
+   stable id;
+3. destroys the old observers and outputs;
+4. re-runs the new server function in the same session, restoring the
+   matching state.
+
+On the client, only the parts of the page whose markup changed are swapped,
+then rebound through Shiny with their input values restored. New widget
+dependencies are loaded. The websocket stays connected throughout.
+
+Event handlers (`observeEvent()`) created during a reload do not re-fire for
+events that were already handled before it.
+
+## Publishing to plain shiny
 
 ```r
-library(hotShiny)
-library(shiny.tailwind)
-
-ui <- function() {
-  div(
-    use_tailwind(),  # head content is hoisted automatically
-    div(class = "max-w-xl mx-auto mt-10 p-8 bg-white rounded-2xl shadow-lg",
-      h1(class = "text-3xl font-bold text-blue-600", "hotShiny + Tailwind"),
-      textInput("name", NULL, class = "mt-4 border rounded-lg px-3 py-2 w-full"),
-      div(class = "mt-4 text-gray-700", textOutput("greeting"))
-    )
-  )
-}
-
-server <- function(input, output, session) {
-  output$greeting <- renderText(paste0("Hello, ", input$name))
-}
-
-app_obj <- app(ui, server, bootstrap = FALSE)  # drop the built-in Bootstrap 5
-enable_hot_reload(app_obj)
-app_obj$runApp()
+hotShiny::publish_to_shiny("myapp", "myapp-shiny")
+shiny::runApp("myapp-shiny")
 ```
 
-If `shiny.tailwind` isn't installed you can inline the same CDN script yourself
-with `HTML('<script src="https://unpkg.com/@tailwindcss/browser@4"></script>')`
-— hotShiny hoists raw `<script>`/`<style>` head fragments just the same.
+This writes a copy of the app that needs only shiny:
 
-### 3. Precompiled CSS (production)
+- `library(hotShiny)` and `hotShiny::` become `shiny`;
+- development-only calls are removed;
+- hotShiny's extended input arguments become
+  `htmltools::tagAppendAttributes()` calls;
+- if the app uses Tailwind utility classes, `shiny.tailwind` is added.
 
-For production you can ship a precompiled stylesheet instead of the CDN
-compiler. Compile your CSS (e.g. with `shiny.tailwind::compile_tailwindcss()`)
-into the app's `www/` directory — hotShiny serves `www/` like Shiny does — and
-link it from `tags$head()`:
+A `PUBLISHED.md` file lists every change and the packages the published app
+needs.
+
+## Styling with Tailwind
+
+hotShiny's input functions accept extra attributes. `class` is appended to
+the control's own classes:
 
 ```r
-ui <- function() {
-  div(
-    tags$head(tags$link(rel = "stylesheet", href = "tailwind.min.css")),
-    h1(class = "text-3xl font-bold text-blue-600", "Hello")
-  )
-}
-
-app_obj <- app(ui, server, bootstrap = FALSE)
+textInput("name", NULL, class = "border rounded-xl px-3 py-2")
+selectInput("pick", "Pick", c("a", "b"), class = "ring-2 ring-blue-300")
 ```
 
-`tags$head()` content and `htmlDependency()` objects are hoisted into the page
-`<head>` automatically, so other dependency-based packages work too.
+With no extra arguments these functions return exactly what shiny returns.
 
-## Architecture
+Run with `runApp(..., tailwind = TRUE)` to load Tailwind's CDN build during
+development. Alternatively, call `shiny.tailwind::use_tailwind()` in the UI
+yourself, which works in both runtimes. `publish_to_shiny()` converts the
+extra attributes and adds `use_tailwind()` when it detects Tailwind classes.
 
-hotShiny transforms Shiny code into a reactive graph:
-
-1. **Graph Builder**: Parses Shiny code and builds a reactive graph
-2. **IR System**: Represents reactive nodes as data (not closures)
-3. **Runtime Executor**: Executes the graph in correct order
-4. **Hot Reload Engine**: Diffs graph versions and preserves state
-5. **Client Library**: Vanilla JS client with DOM diffing
-
-## Compatibility
-
-hotShiny supports most Shiny patterns:
-
-- ✅ Standard reactive expressions
-- ✅ `observe()` and `observeEvent()`
-- ✅ All `render*()` functions
-- ✅ `reactiveValues()`
-- ✅ Standard UI components
-
-Some patterns are not supported:
-
-- ❌ Non-deterministic side effects
-- ❌ Meta-programming (`get()`, `assign()`)
-- ❌ Global environment mutation (`<<-`)
-- ❌ Dynamic output assignment
-
-### Unsupported Pattern Examples
-
-**Non-deterministic side effects** - Code that produces different results on re-execution:
+## Developer tools
 
 ```r
-# ❌ Avoid: Random values without seed
-output$random <- renderText({
-
-  sample(1:100, 1)  # Different result each time
-})
-
-# ❌ Avoid: System time dependencies
-output$timestamp <- renderText({
-  Sys.time()  # Changes on hot reload
-})
+visualize_graph()                 # nodes and run-time dependency edges of a session
+cat(visualize_graph(format = "dot"))
+reactive_history()                # recorded events (time_travel = TRUE)
+replay_inputs(42)                 # rewind a session's inputs to event 42
+strict_check(function() { write.csv(x, "f.csv"); x })
 ```
 
-**Meta-programming** - Dynamic variable access breaks dependency tracking:
+## Testing
 
-```r
-# ❌ Avoid: Dynamic variable access
-server <- function(input, output, session) {
-  output$result <- renderText({
-    var_name <- input$selected_var
-    get(var_name, envir = parent.frame())  # Dependencies not tracked
-  })
-}
+- `tests/testthat`: engine semantics, UI extensions, publishing and the bridge
+  (`testthat::test_local()`).
+- `tests/e2e`: Playwright end-to-end suite. Every fixture app runs both
+  under plain shiny (produced with `publish_to_shiny()`) and under hotShiny.
+  - **Behaviour** specs assert identical results in both runtimes.
+  - **Parity** specs diff the live DOM, the loaded dependencies and the
+    rendered pixels.
+  - **Hot-reload** specs edit app sources while a browser is connected.
 
-# ❌ Avoid: Dynamic assignment
-observe({
-  assign(paste0("value_", input$id), input$value, envir = .GlobalEnv)
-})
-```
-
-**Global environment mutation** - Superassignment creates hidden state:
-
-```r
-# ❌ Avoid: Global state mutation
-counter <- 0
-server <- function(input, output, session) {
-  observe({
-    counter <<- counter + 1  # Hidden state, lost on hot reload
-  })
-}
-```
-
-**Dynamic output assignment** - Outputs must be statically defined:
-
-```r
-# ❌ Avoid: Dynamic output creation
-server <- function(input, output, session) {
-  observe({
-    output[[paste0("plot_", input$id)]] <- renderPlot({
-      plot(1:10)
-    })
-  })
-}
-```
-
-## Development Features
-
-### Hot Reload
-
-```r
-app_obj <- app(ui, server)
-enable_hot_reload(app_obj, watch_paths = c("app.R", "server.R"))
-```
-
-### Strict Mode
-
-```r
-enable_strict_mode(app_obj)
-# Warns about side effects and non-deterministic code
-```
-
-### Time-Travel Debugging
-
-```r
-enable_time_travel(app_obj)
-# Record and replay reactivity
-```
-
-### Debug Logging
-
-By default, hotShiny produces minimal console output. To enable verbose debug logging:
-
-**Server-side (R):**
-
-```r
-# Enable verbose logging before running app
-options(hotshiny.verbose = TRUE)
-app_obj$runApp()
-```
-
-This will show detailed logs for:
-- Graph building and dependency extraction
-- Hot reload operations
-- Reactive execution
-- WebSocket communication
-
-**Client-side (Browser):**
-
-```javascript
-// In browser console
-window.HOTSHINY_DEBUG = true;
-```
-
-This enables detailed client-side logging for:
-- WebSocket messages
-- DOM updates
-- Input/output handling
-- Hot reload events
-
-## Documentation
-
-See the [plan file](plan) for detailed architecture and implementation notes.
+  ```sh
+  R CMD INSTALL .
+  cd tests/e2e && npm ci && npx playwright test
+  ```
 
 ## License
 

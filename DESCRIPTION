@@ -1,62 +1,46 @@
 Package: hotShiny
 Type: Package
 Title: Shiny-Compatible Reactive Framework with Hot Reloading
-Version: 0.2.0
-Author: Jesus Rodriguez (Dark Peak Analytics)
-Maintainer: Jesus Rodriguez <jrodriguezperez@darkpeakanalytics.com>
-Description: A Shiny-compatible R package that supports hot-reloading by
-    transforming Shiny's execution model into a declarative, diffable reactive
-    graph. Maintains API compatibility while fundamentally changing runtime semantics.
-License: MIT
+Version: 0.3.0
+Authors@R: person("Jesus", "Rodriguez", role = c("aut", "cre"),
+    email = "jrodriguezperez@darkpeakanalytics.com")
+Description: A drop-in replacement for 'shiny' that runs apps on its own
+    reactive engine, which records the reactive graph of every session so it
+    can be inspected, diffed and hot-reloaded while preserving state. The UI
+    layer, client (shiny.js) and wire protocol are Shiny's own, so apps,
+    extension packages and htmlwidgets render and behave as they do under
+    'shiny'. Apps written with 'hotShiny' can be published to plain 'shiny'
+    with publish_to_shiny().
+License: MIT + file LICENSE
 Encoding: UTF-8
-LazyData: true
+Depends:
+    R (>= 4.1.0)
 Imports:
+    shiny (>= 1.10.0),
+    htmltools (>= 0.5.4),
     R6 (>= 2.5.0),
     rlang (>= 1.0.0),
     httpuv (>= 1.6.0),
     later (>= 1.3.0),
+    promises (>= 1.2.0),
     jsonlite (>= 1.8.0),
-    digest (>= 0.6.0)
+    base64enc,
+    fastmap (>= 1.1.0),
+    cachem,
+    stats,
+    tools,
+    utils
 Suggests:
     testthat (>= 3.0.0),
-    shinytest2 (>= 0.1.0),
-    base64enc (>= 0.1.0),
-    markdown
-RoxygenNote: 7.3.3
-Collate: 
-    'ir-node-types.R'
-    'ir-dependency-tracker.R'
-    'ir-graph-builder.R'
-    'ir-serializer.R'
-    'runtime-state-manager.R'
-    'runtime-versioning.R'
-    'runtime-executor.R'
-    'core-reactive.R'
-    'core-observe.R'
-    'core-render.R'
-    'core-values.R'
-    'core-strict-mode.R'
-    'server-message-handler.R'
-    'server-session-manager.R'
-    'server-websocket.R'
-    'hot-reload-file-watcher.R'
-    'hot-reload-graph-diff.R'
-    'hot-reload-state-preservation.R'
-    'hot-reload-reload-engine.R'
-    'debug-time-travel.R'
-    'ui-tags.R'
-    'ui-inputs.R'
-    'ui-outputs.R'
-    'ui-layout.R'
-    'ui-navigation.R'
-    'ui-modals.R'
-    'ui-updates.R'
-    'ui-dynamic.R'
-    'compat-reactive.R'
-    'compat-session.R'
-    'compat-app.R'
-    'compat-modules.R'
-    'compat-stubs.R'
-    'translator.R'
-    'app.R'
-    'zzz.R'
+    bslib,
+    DT,
+    plotly,
+    htmlwidgets,
+    shinyWidgets,
+    shinyjs,
+    shiny.tailwind,
+    ragg,
+    markdown,
+    withr
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

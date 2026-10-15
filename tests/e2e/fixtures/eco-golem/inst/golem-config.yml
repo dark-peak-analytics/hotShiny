@@ -1,0 +1,7 @@
+default:
+  golem_name: ecogolem
+  golem_version: 0.0.0.9000
+  app_prod: no
+  greeting: "Hello from golem-config.yml"
+production:
+  app_prod: yes
