@@ -44,6 +44,29 @@ hotShiny::runApp("app.R", hot_reload = TRUE)
 Edit `app.R` and save. The page updates in place without a refresh. Inputs,
 `reactiveVal()` and `reactiveValues()` state, and scroll position are kept.
 
+### Apps split into ui.R / server.R and modules
+
+Pass the app's directory instead of a file:
+
+```
+myapp/
+├── global.R
+├── ui.R
+├── server.R
+└── R/
+    ├── counter_module.R
+    └── plot_module.R
+```
+
+```r
+hotShiny::runApp("myapp", hot_reload = TRUE)
+```
+
+As with `shiny::runApp()`, `global.R` and every file in `R/` are sourced
+first, so modules don't need to be `source()`d by hand. Every file in the
+directory is watched, so an edit to a module reloads just like an edit to
+`ui.R` or `server.R`.
+
 Development features are switched on by the launcher, never inside the app
 file, so the file stays plain shiny:
 

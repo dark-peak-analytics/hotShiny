@@ -126,17 +126,31 @@ replay_inputs <- function(upto, session = NULL) {
 #' `hotShiny::runApp("app.R", hot_reload = TRUE)`, so the app file runs
 #' unchanged under plain shiny.
 #'
-#' @param ui,server UI and server, as for [shiny::shinyApp()].
-#' @param ... Passed to [shinyApp()].
+#' @param ui,server UI and server, as for [shiny::shinyApp()], or the paths of
+#'   an app's `ui.R` and `server.R` files, which loads that app directory as
+#'   [shinyAppDir()] does.
+#' @param ... Passed to [shinyApp()] (or [shinyAppDir()] for file paths).
 #' @param bootstrap Ignored (the UI is shiny's).
 #' @export
 app <- function(ui, server, ..., bootstrap = TRUE) {
-  a <- shinyApp(ui, server, ...)
+  dir <- app_dir_of_files(ui, server)
+  a <- if (is.null(dir)) shinyApp(ui, server, ...) else shinyAppDir(dir, ...)
   a$runApp <- function(host = "127.0.0.1", port = 3838, ...) {
     runApp(a, host = host, port = port, hot_reload = isTRUE(attr(a, "hot_reload")) ||
              getOption("hotshiny.hot_reload", FALSE), ...)
   }
   a
+}
+
+# The directory holding `ui` and `server` when they are the paths of its ui.R
+# and server.R files, else NULL.
+app_dir_of_files <- function(ui, server) {
+  is_path <- function(x) is.character(x) && length(x) == 1 && file.exists(x)
+  if (!is_path(ui) || !is_path(server)) return(NULL)
+  if (!identical(c(basename(ui), basename(server)), c("ui.R", "server.R"))) return(NULL)
+  dirs <- normalizePath(dirname(c(ui, server)), mustWork = TRUE)
+  if (dirs[[1]] != dirs[[2]]) return(NULL)
+  dirs[[1]]
 }
 
 #' @rdname app

@@ -17,6 +17,11 @@
 #' @export
 shinyApp <- function(ui, server, onStart = NULL, options = list(), uiPattern = "/",
                      enableBookmarking = NULL) {
+  if (is.character(server)) {
+    stop("`server` must be a function, not a file path. To run an app split into ui.R and ",
+         "server.R, pass its directory to runApp(), e.g. ",
+         "hotShiny::runApp(\"path/to/app\", hot_reload = TRUE).", call. = FALSE)
+  }
   if (!is.function(server)) stop("`server` must be a function", call. = FALSE)
   if (!is.null(enableBookmarking) && !identical(enableBookmarking, "disable")) {
     warning("hotShiny does not support bookmarking; enableBookmarking is ignored.", call. = FALSE)
