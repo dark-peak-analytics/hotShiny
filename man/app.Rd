@@ -16,9 +16,11 @@ enable_time_travel(app = NULL, max_history = 5000)
 disable_time_travel(app = NULL)
 }
 \arguments{
-\item{ui, server}{UI and server, as for [shiny::shinyApp()].}
+\item{ui, server}{UI and server, as for [shiny::shinyApp()], or the paths of
+an app's `ui.R` and `server.R` files, which loads that app directory as
+[shinyAppDir()] does.}
 
-\item{...}{Passed to [shinyApp()].}
+\item{...}{Passed to [shinyApp()] (or [shinyAppDir()] for file paths).}
 
 \item{bootstrap}{Ignored (the UI is shiny's).}
 
